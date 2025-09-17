@@ -1,14 +1,15 @@
 <#
     Script: setup-python.ps1
-    Objetivo: Configurar ou validar o ambiente Python deste projeto.
+    Objetivo: Configurar ou validar o ambiente Python deste projeto para automação com setup.dev.py.
 
     Funcionalidades:
       - Detecta Python no PATH (ou usa caminho informado)
       - Verifica versao minima (3.10+)
       - Cria venv em .venv (ou caminho customizado)
-      - Instala dependencias do requirements.txt
-      - Valida pacotes instalados
+      - Instala dependencias do requirements.txt (incluindo bcrypt e outras necessárias)
+      - Valida pacotes instalados para garantir compatibilidade com setup.dev.py
       - Exporta status em JSON (opcional)
+      - Suporta execução direta do setup.dev.py após configuração
 
     Uso:
       ./setup-python.ps1                   # Cria/valida venv e instala deps
@@ -17,6 +18,8 @@
       ./setup-python.ps1 -Python python3   # Forca executavel Python
       ./setup-python.ps1 -SkipPipUpgrade   # Nao roda pip install --upgrade pip
       ./setup-python.ps1 -StatusJson out\status-python.json
+      ./setup-python.ps1 -RunSetupDev      # Executa setup.dev.py após configuração
+      ./setup-python.ps1 -RunSetupDev -SetupDevArgs "--only-check" # Passa argumentos ao setup.dev.py
 
     Requer: Windows PowerShell 5.1+ (ou PowerShell 7), acesso a internet para instalar pacotes.
 #>
@@ -30,7 +33,9 @@ param(
     [switch]$NoColor,
     [switch]$Quiet,
     [switch]$SkipPipUpgrade,
-    [string]$StatusJson
+    [string]$StatusJson,
+    [switch]$RunSetupDev,
+    [string]$SetupDevArgs
 )
 
 # Fallback robusto para diretório do script
@@ -139,6 +144,10 @@ function Install-Requirements {
         Write-Info 'Atualizando pip...'
         & $VenvPy -m pip install --upgrade pip | Out-Null
     }
+    
+    # Lista de pacotes críticos que devem ser instalados mesmo que não estejam no requirements.txt
+    $criticalPackages = @('bcrypt')
+    
     if(Test-Path $ReqPath){
         Write-Info "Instalando dependencias ($([System.IO.Path]::GetFileName($ReqPath)))..."
         & $VenvPy -m pip install -r $ReqPath
@@ -147,6 +156,26 @@ function Install-Requirements {
         $global:STATUS.Pip = 'OK'
     } else {
         Write-Warn 'Arquivo requirements.txt nao encontrado, pulando instalacao.'
+    }
+    
+    # Verificar e instalar pacotes críticos que podem não estar no requirements.txt
+    $missingCritical = @()
+    foreach($pkg in $criticalPackages) {
+        $checkCmd = "import importlib.util; print('installed' if importlib.util.find_spec('$pkg') else 'missing')"
+        $checkResult = & $VenvPy -c $checkCmd 2>$null
+        if($checkResult -ne 'installed') {
+            $missingCritical += $pkg
+        }
+    }
+    
+    if($missingCritical.Count -gt 0) {
+        Write-Info "Instalando pacotes críticos adicionais: $($missingCritical -join ', ')..."
+        & $VenvPy -m pip install $missingCritical
+        if($LASTEXITCODE -ne 0) {
+            Write-Warn "Falha ao instalar pacotes críticos. O setup.dev.py pode não funcionar corretamente."
+        } else {
+            Write-Ok "Pacotes críticos instalados com sucesso."
+        }
     }
 }
 
@@ -184,18 +213,31 @@ function Test-Requirements {
         Write-Warn "Erro ao executar pip freeze: $_"
         return
     }
+    
+    # Pacotes críticos necessários para setup.dev.py funcionar
+    $criticalPackages = @('bcrypt')
+    
     $installed = @{}
     foreach($line in ($freeze -split "`n")){
         if([string]::IsNullOrWhiteSpace($line)){ continue }
         $name = ($line -split '==')[0].Trim().ToLowerInvariant()
         if(-not $installed.ContainsKey($name)){ $installed[$name] = $true }
     }
+    
     $missing = @()
     foreach($req in Get-Content -Path $ReqPath){
         if($req -match '^(#|\s*$)'){ continue }
         $base = ($req -split '==|>=' )[0].Trim().ToLowerInvariant()
         if(-not $installed.ContainsKey($base)){ $missing += $base }
     }
+    
+    # Verifica pacotes críticos adicionais que podem não estar no requirements.txt
+    foreach($pkg in $criticalPackages) {
+        if(-not $installed.ContainsKey($pkg.ToLowerInvariant()) -and -not $missing.Contains($pkg.ToLowerInvariant())) {
+            $missing += $pkg.ToLowerInvariant()
+        }
+    }
+    
     $global:STATUS.MissingPackages = $missing
     if($missing.Count -gt 0){ Write-Warn ("Dependencias ausentes: {0}" -f ($missing -join ', ')) } else { Write-Ok 'Dependencias requeridas presentes.' }
 }
@@ -311,6 +353,37 @@ if($suggestions.Count -gt 0){
 }
 
 if($StatusJson){ Export-StatusJson -Path $StatusJson }
+
+# Executar setup.dev.py se solicitado e o ambiente estiver pronto
+if($RunSetupDev -and $global:STATUS.Venv -eq 'OK' -and -not $global:HAS_ERROR){
+    $setupDevPath = Join-Path $ScriptRoot 'setup.dev.py'
+    if(Test-Path $setupDevPath){
+        Write-Host ""
+        Write-Info "Executando setup.dev.py para verificar/configurar o ambiente completo..."
+        $venvPy = Get-VenvPython -Path $VenvPath
+        
+        $setupCmd = "$venvPy `"$setupDevPath`""
+        if(-not [string]::IsNullOrWhiteSpace($SetupDevArgs)){
+            $setupCmd += " $SetupDevArgs"
+        }
+        
+        Write-Host ""
+        Write-Host "========== INICIANDO SETUP.DEV.PY ==========" -ForegroundColor Cyan
+        
+        # Executar o comando
+        Invoke-Expression $setupCmd
+        
+        if($LASTEXITCODE -eq 0){
+            Write-Ok "setup.dev.py concluído com sucesso."
+        }
+        else {
+            Write-Warn "setup.dev.py concluído com código de saída $LASTEXITCODE. Verifique os logs acima."
+        }
+    }
+    else {
+        Write-Warn "setup.dev.py não encontrado em $setupDevPath"
+    }
+}
 
 # No modo OnlyCheck, falhar apenas se Python global não está disponível
 if($OnlyCheck){
