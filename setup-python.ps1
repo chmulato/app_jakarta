@@ -133,20 +133,20 @@ function Initialize-Venv {
 
 function Install-Requirements {
     param([string]$VenvPy,[string]$ReqPath,[switch]$SkipUpgrade)
-    if(-not (Test-Path $VenvPy)){ throw 'Executável Python da venv não encontrado.' }
+    if(-not (Test-Path $VenvPy)){ throw 'Executavel Python da venv nao encontrado.' }
     if($SkipUpgrade){ Write-Info 'Pulando upgrade do pip.' }
     else {
         Write-Info 'Atualizando pip...'
         & $VenvPy -m pip install --upgrade pip | Out-Null
     }
     if(Test-Path $ReqPath){
-        Write-Info "Instalando dependências ($([System.IO.Path]::GetFileName($ReqPath)))..."
+        Write-Info "Instalando dependencias ($([System.IO.Path]::GetFileName($ReqPath)))..."
         & $VenvPy -m pip install -r $ReqPath
-        if($LASTEXITCODE -ne 0){ throw 'Falha ao instalar dependências.' }
-        Write-Ok 'Dependências instaladas.'
+        if($LASTEXITCODE -ne 0){ throw 'Falha ao instalar dependencias.' }
+        Write-Ok 'Dependencias instaladas.'
         $global:STATUS.Pip = 'OK'
     } else {
-        Write-Warn 'Arquivo requirements.txt não encontrado, pulando instalação.'
+        Write-Warn 'Arquivo requirements.txt nao encontrado, pulando instalacao.'
     }
 }
 
