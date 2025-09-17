@@ -145,7 +145,7 @@ function Install-Requirements {
         & $VenvPy -m pip install --upgrade pip | Out-Null
     }
     
-    # Lista de pacotes críticos que devem ser instalados mesmo que não estejam no requirements.txt
+    # Lista de pacotes críticos que devem ser instalados para validação de hash criptográfico
     $criticalPackages = @('bcrypt')
     
     if(Test-Path $ReqPath){
@@ -158,24 +158,39 @@ function Install-Requirements {
         Write-Warn 'Arquivo requirements.txt nao encontrado, pulando instalacao.'
     }
     
-    # Verificar e instalar pacotes críticos que podem não estar no requirements.txt
+    # Verificar e instalar pacotes críticos para validação de hash criptográfico
     $missingCritical = @()
     foreach($pkg in $criticalPackages) {
-        $checkCmd = "import importlib.util; print('installed' if importlib.util.find_spec('$pkg') else 'missing')"
-        $checkResult = & $VenvPy -c $checkCmd 2>$null
-        if($checkResult -ne 'installed') {
+        Write-Info "Verificando pacote crítico: $pkg..."
+        try {
+            $checkCmd = "import importlib.util; print('installed' if importlib.util.find_spec('$pkg') else 'missing')"
+            $checkResult = & $VenvPy -c $checkCmd 2>$null
+            if($checkResult -ne 'installed') {
+                $missingCritical += $pkg
+                Write-Info "Pacote $pkg não encontrado, será instalado."
+            } else {
+                Write-Ok "Pacote $pkg já está instalado."
+            }
+        } catch {
             $missingCritical += $pkg
+            Write-Warn "Erro ao verificar $pkg, será instalado."
         }
     }
     
     if($missingCritical.Count -gt 0) {
-        Write-Info "Instalando pacotes críticos adicionais: $($missingCritical -join ', ')..."
-        & $VenvPy -m pip install $missingCritical
-        if($LASTEXITCODE -ne 0) {
-            Write-Warn "Falha ao instalar pacotes críticos. O setup.dev.py pode não funcionar corretamente."
-        } else {
-            Write-Ok "Pacotes críticos instalados com sucesso."
+        Write-Info "Instalando pacotes críticos para validação de hash criptográfico: $($missingCritical -join ', ')..."
+        foreach($pkg in $missingCritical) {
+            Write-Info "Instalando $pkg..."
+            & $VenvPy -m pip install $pkg
+            if($LASTEXITCODE -ne 0) {
+                Write-Err "Falha ao instalar $pkg. O setup.dev.py pode não validar corretamente os hashes criptográficos."
+                $global:HAS_ERROR = $true
+            } else {
+                Write-Ok "Pacote $pkg instalado com sucesso."
+            }
         }
+    } else {
+        Write-Ok "Todos os pacotes críticos para validação de hash estão instalados."
     }
 }
 
@@ -214,7 +229,7 @@ function Test-Requirements {
         return
     }
     
-    # Pacotes críticos necessários para setup.dev.py funcionar
+    # Pacotes críticos necessários para setup.dev.py funcionar, especialmente validação de hash criptográfico
     $criticalPackages = @('bcrypt')
     
     $installed = @{}
@@ -235,6 +250,7 @@ function Test-Requirements {
     foreach($pkg in $criticalPackages) {
         if(-not $installed.ContainsKey($pkg.ToLowerInvariant()) -and -not $missing.Contains($pkg.ToLowerInvariant())) {
             $missing += $pkg.ToLowerInvariant()
+            Write-Warn "Pacote crítico para validação de hash criptográfico '$pkg' não encontrado."
         }
     }
     

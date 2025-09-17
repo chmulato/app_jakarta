@@ -1,7 +1,51 @@
 <div align="center">
 
 # 🚀 Projeto Java Web (Tomcat / WildFly) 
-Sistema web Java (Jakarta EE) com autenticação, deploy flexível em Tomcat ou WildFly, automação via script Python e integração PostgreSQL.
+Sistema web Java (Jakarta EE) com autenticação, deploy fl- **Correção automática:** Se `bcrypt` estiver faltando, o script instala automaticamente e revalida o hash.
+
+### Verificações de Ambiente Detalhadas
+- **Java/Maven:** Versões mínimas e disponibilidade de comandos
+- **Docker:** Daemon ativo e containers PostgreSQL em execução
+- **Banco de dados:** Conectividade e estrutura da tabela `usuarios`
+- **Dependências Python:** Instalação automática de pacotes críticos (`bcrypt`, `psycopg2`, etc.)
+- **Servidores:** Estrutura de diretórios Tomcat/WildFly e arquivos de configuração
+
+### Scripts de Setup Detalhados
+
+#### `setup.dev.py` - Setup Completo Python
+Script principal para configuração completa do ambiente Python:
+```powershell
+python setup.dev.py              # Setup completo com validações
+python setup.dev.py --auto-fix   # Correção automática de problemas detectados
+python setup.dev.py --only-check # Apenas validação (sem modificações)
+```
+
+**Funcionalidades:**
+- Criação e configuração de ambiente virtual Python
+- Instalação automática de dependências críticas (`bcrypt`, `psycopg2-binary`, `colorama`, etc.)
+- Validação completa de ambiente (Java, Maven, Docker, PostgreSQL)
+- **Validação de hash BCrypt do admin** com detecção automática de problemas
+- Verificação de conectividade com banco de dados
+- Relatórios detalhados de status do ambiente
+
+#### `setup-python.ps1` - Setup Focado Python (PowerShell)
+Script PowerShell alternativo para setup mais leve:
+```powershell
+./setup-python.ps1         # Setup completo Python
+./setup-python.ps1 -Force  # Recria ambiente virtual
+./setup-python.ps1 -OnlyCheck # Apenas validação
+```
+
+**Funcionalidades:**
+- Criação de ambiente virtual Python via PowerShell
+- Instalação automática de dependências Python críticas
+- Verificação de instalação do Python e pip
+- Integração com sistema de requirements.txt
+- Validação de ambiente Python específico
+
+---
+
+## 🔧 Variáveis de Ambiente (Overrides)mcat ou WildFly, automação via script Python e integração PostgreSQL.
 
 </div>
 
@@ -94,14 +138,46 @@ Principais verificações:
  - Container PostgreSQL (nome contendo `postgres`)
  - WSL (presença de `wsl.exe` e distros registradas) em ambientes Windows
  - Perfis Maven esperados (`tomcat`, `wildfly`, `run`)
- - Virtualenv Python + libs (`requests`, `colorama`, `psutil`)
+ - Virtualenv Python + libs (`requests`, `colorama`, `psutil`, `bcrypt`)
+ - **Validação de hash do admin** (verifica integridade das credenciais padrão no banco)
+
+**Funcionalidades avançadas dos scripts de setup:**
+- **Instalação automática de dependências críticas**: Scripts detectam e instalam automaticamente bibliotecas Python necessárias (como `bcrypt` para validação de hash)
+- **Validação de ambiente completa**: Inclui verificação de conectividade com banco PostgreSQL e validação de hash das credenciais admin
+- **Correção automática**: Opção `--auto-fix` em `setup.dev.py` permite correção automática de problemas detectados
 
 Se o Docker estiver instalado mas o daemon desligado: iniciar Docker Desktop e reexecutar `./setup-dev.ps1 -OnlyCheck`.
 Se WSL não estiver instalado e pretende usar backend WSL2 do Docker: `wsl --install` (requer reboot).
 
 ---
 
-## 🔧 Variáveis de Ambiente (Overrides)
+## � Validação de Ambiente
+Os scripts de setup realizam validação completa do ambiente de desenvolvimento, incluindo verificação de conectividade com banco e integridade das credenciais.
+
+### Validação de Hash do Admin
+O script `setup.dev.py` inclui validação automática do hash BCrypt do usuário admin padrão:
+- **Status possíveis:**
+  - ✅ **OK**: Hash válido e corresponde à senha padrão
+  - ❌ **MISMATCH**: Hash não corresponde (possível alteração manual)
+  - ⚠️ **N/A**: Biblioteca `bcrypt` não disponível (será instalada automaticamente)
+
+- **Funcionamento:**
+  ```powershell
+  python setup.dev.py --auto-fix  # Executa validação completa com correção automática
+  ```
+
+- **Correção automática:** Se `bcrypt` estiver faltando, o script instala automaticamente e revalida o hash.
+
+### Verificações de Ambiente Detalhadas
+- **Java/Maven:** Versões mínimas e disponibilidade de comandos
+- **Docker:** Daemon ativo e containers PostgreSQL em execução
+- **Banco de dados:** Conectividade e estrutura da tabela `usuarios`
+- **Dependências Python:** Instalação automática de pacotes críticos (`bcrypt`, `psycopg2`, etc.)
+- **Servidores:** Estrutura de diretórios Tomcat/WildFly e arquivos de configuração
+
+---
+
+## �🔧 Variáveis de Ambiente (Overrides)
 O script `main.py` aceita overrides para diretórios dos servidores.
 
 | Variável | Propósito | Exemplo |
@@ -257,6 +333,8 @@ mvn -Prun
 | WAR não gerado | Conferir `mvn clean package -Ptomcat` saída e existência de `target/*.war` |
 | JDBC falha | Ver container postgres (`docker ps`) + credenciais em `persistence.xml` |
 | JSTL erro URI | Usar URIs `jakarta.tags.*` e dependências JSTL 3.x |
+| **AdminHash mostra N/A** | `python setup.dev.py --auto-fix` (instala bcrypt automaticamente) |
+| **AdminHash mostra MISMATCH** | Verificar se senha do admin foi alterada no banco; reset se necessário |
 
 Material detalhado: ver `doc/TESTES-RELATORIO.md`, `doc/DEPLOY.md` e `doc/ARQUITETURA.md`.
 

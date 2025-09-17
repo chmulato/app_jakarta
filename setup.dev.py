@@ -1083,11 +1083,28 @@ def validate_admin_hash(args):
     hash_val = cp_hash.stdout.strip()
     if not BCRYPT_HASH_PATTERN.match(hash_val):
         warn("Formato de hash inesperado (não parece BCrypt).", args)
+    
+    # Tentar instalar bcrypt automaticamente se não estiver disponível
     try:
-        import bcrypt  # type: ignore
-    except Exception:
-        warn("Biblioteca bcrypt não instalada na venv (pular validação).", args)
-        return
+        import bcrypt
+    except ImportError:
+        warn("Biblioteca bcrypt não instalada. Tentando instalar automaticamente...", args)
+        try:
+            # Instalar bcrypt usando pip
+            pip_cmd = [sys.executable, "-m", "pip", "install", "bcrypt"]
+            cp_install = run_cmd(pip_cmd, capture=True)
+            if cp_install.returncode == 0:
+                ok("Biblioteca bcrypt instalada com sucesso.", args)
+                import bcrypt
+            else:
+                err("Falha ao instalar biblioteca bcrypt automaticamente.", args)
+                status.set("AdminHash", "ERRO")
+                return
+        except Exception as e:
+            err(f"Erro ao instalar bcrypt: {e}", args)
+            status.set("AdminHash", "ERRO")
+            return
+    
     try:
         if bcrypt.checkpw(ADMIN_PLAIN.encode(), hash_val.encode()):
             status.set("AdminHash", "OK")
