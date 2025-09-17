@@ -71,10 +71,17 @@ docker --version
 ## ⚡ Setup Rápido (Automatizado)
 Para preparar o ambiente (checagens + venv + dependências Python):
 ```powershell
+# Setup completo (inclui verificações Java, Maven, Docker, banco)
 ./setup-dev.ps1            # Executa checagens e cria venv se necessário
 ./setup-dev.ps1 -OnlyCheck # Apenas valida ambiente
 ./setup-dev.ps1 -Force     # Recria venv
 ./setup-dev.ps1 -SkipPython # Pula parte Python
+
+# Apenas setup Python (alternativa mais leve e focada)
+./setup-python.ps1         # Cria venv e instala dependências Python
+./setup-python.ps1 -OnlyCheck # Apenas valida ambiente Python
+./setup-python.ps1 -Force  # Recria venv
+./setup-python.ps1 -Python python3 # Especifica executável Python
 ```
 Após execução bem-sucedida:
 ```powershell
