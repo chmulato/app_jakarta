@@ -20,7 +20,76 @@ import time
 import logging
 import tempfile
 import glob
-import requests
+
+def validate_python_environment():
+    """
+    Valida se o script está sendo executado com o Python da venv, não o global.
+    """
+    # Detectar se estamos usando o Python global
+    python_executable = sys.executable
+    workspace_dir = os.path.dirname(os.path.abspath(__file__))
+    venv_python = os.path.join(workspace_dir, ".venv", "Scripts", "python.exe")
+    
+    # Verificar se o Python atual é o da venv
+    if not python_executable.lower().endswith(venv_python.lower()):
+        # Verificar se a venv existe
+        if os.path.exists(venv_python):
+            print("=" * 80)
+            print("⚠️  AVISO: Script executado com Python global!")
+            print("=" * 80)
+            print("Para evitar problemas de dependências, execute com o Python da venv:")
+            print()
+            print("Opção 1 - Ativar venv e executar:")
+            print("  . .\\.venv\\Scripts\\Activate.ps1")
+            print("  python .\\main.py")
+            print()
+            print("Opção 2 - Executar direto com Python da venv:")
+            print("  .\\.venv\\Scripts\\python.exe .\\main.py")
+            print()
+            print("Se a venv não existir, crie com:")
+            print("  .\\setup-python.ps1")
+            print("=" * 80)
+            
+            # Perguntar se quer continuar mesmo assim
+            try:
+                choice = input("Deseja continuar mesmo assim? (S/N): ").strip().upper()
+                if choice != 'S':
+                    print("Execução cancelada. Use o Python da venv para melhor compatibilidade.")
+                    sys.exit(1)
+                else:
+                    print("Continuando com Python global... (pode haver problemas de dependências)")
+            except KeyboardInterrupt:
+                print("\nExecução cancelada.")
+                sys.exit(1)
+        else:
+            print("=" * 80)
+            print("⚠️  AVISO: Virtual environment não encontrada!")
+            print("=" * 80)
+            print("Crie a venv primeiro com:")
+            print("  .\\setup-python.ps1")
+            print()
+            print("Depois execute com:")
+            print("  .\\.venv\\Scripts\\python.exe .\\main.py")
+            print("=" * 80)
+            sys.exit(1)
+
+# Validar ambiente Python antes de prosseguir
+validate_python_environment()
+
+try:
+    import requests
+except ModuleNotFoundError:
+    # Mensagem amigável quando o script é executado com o Python global sem a venv
+    print("Erro: módulo 'requests' não encontrado.\n"
+          "Provavelmente você executou com o Python global (fora da venv).\n"
+          "Execute um dos comandos abaixo:\n\n"
+          "1) Ativar a venv e rodar:\n"
+          ". .\\.venv\\Scripts\\Activate.ps1; python .\\main.py\n\n"
+          "2) Rodar direto com o Python da venv (sem ativar):\n"
+          ".\\.venv\\Scripts\\python.exe .\\main.py\n\n"
+          "Se a venv não existir, crie/atualize com: ./setup-python.ps1")
+    import sys
+    sys.exit(1)
 import zipfile
 import re
 import argparse
@@ -130,6 +199,50 @@ def log(message, level="INFO"):
         logger.info(message)
     
     print(f"{timestamp} - {color}{level}{Colors.END}: {message}")
+
+def http_download(url, dest_path, timeout=30, max_retries=3, backoff_seconds=2, chunk_size=8192):
+    """
+    Faz download HTTP com retries exponenciais e tratamento de exceções.
+
+    Args:
+        url (str): URL do recurso
+        dest_path (str): Caminho do arquivo de destino
+        timeout (int): Timeout em segundos por tentativa
+        max_retries (int): Número máximo de tentativas
+        backoff_seconds (int): Backoff base entre tentativas
+        chunk_size (int): Tamanho do chunk em bytes
+
+    Returns:
+        bool: True em caso de sucesso, False em caso de falha definitiva
+    """
+    try:
+        os.makedirs(os.path.dirname(dest_path) or ".", exist_ok=True)
+    except Exception:
+        pass
+
+    attempt = 0
+    while attempt < max_retries:
+        attempt += 1
+        try:
+            log(f"Baixando: {url} (tentativa {attempt}/{max_retries})", "INFO")
+            r = requests.get(url, stream=True, timeout=timeout)
+            r.raise_for_status()
+            with open(dest_path, "wb") as f:
+                for chunk in r.iter_content(chunk_size):
+                    if chunk:
+                        f.write(chunk)
+            return True
+        except Exception as e:
+            # Em erros de rede/HTTP, fazer retry (exceto último)
+            if attempt >= max_retries:
+                log(f"Falha ao baixar {url}: {e}", "ERROR")
+                return False
+            sleep_for = backoff_seconds * attempt
+            log(f"Erro ao baixar {url}: {e} — tentando novamente em {sleep_for}s", "WARNING")
+            try:
+                time.sleep(sleep_for)
+            except Exception:
+                pass
 
 def load_db_config_from_compose():
     """
@@ -916,33 +1029,39 @@ def configure_wildfly_postgres_datasource():
         module_xml = os.path.join(module_dir, "module.xml")
 
         if not os.path.exists(jar_path):
-            try:
-                url = f"https://repo1.maven.org/maven2/org/postgresql/postgresql/{driver_version}/{jar_name}"
-                log(f"Baixando driver PostgreSQL: {url}", "INFO")
-                r = requests.get(url, stream=True, timeout=30)
-                r.raise_for_status()
-                with open(jar_path, "wb") as f:
-                    for chunk in r.iter_content(8192):
-                        f.write(chunk)
+            url = f"https://repo1.maven.org/maven2/org/postgresql/postgresql/{driver_version}/{jar_name}"
+            if http_download(url, jar_path, timeout=30, max_retries=3, backoff_seconds=2):
                 log("Driver PostgreSQL baixado para o módulo do WildFly", "SUCCESS")
-            except Exception as e:
-                log(f"Falha ao baixar driver PostgreSQL: {e}", "ERROR")
+            else:
+                log("Falha ao baixar driver PostgreSQL (tente rodar novamente mais tarde ou verifique sua rede)", "ERROR")
                 return False
 
-        if not os.path.exists(module_xml):
-            content = f"""
-<module xmlns="urn:jboss:module:1.9" name="{module_name}">
+        # Criar/atualizar module.xml do driver garantindo dependências essenciais
+        desired_module_xml = f"""
+<module xmlns=\"urn:jboss:module:1.9\" name=\"{module_name}\">
   <resources>
-    <resource-root path="{jar_name}"/>
+    <resource-root path=\"{jar_name}\"/>
   </resources>
   <dependencies>
-    <module name="jakarta.transaction.api"/>
+    <module name=\"java.se\"/>
+    <module name=\"jakarta.transaction.api\"/>
   </dependencies>
 </module>
 """.strip()
+        write_module_xml = True
+        if os.path.exists(module_xml):
+            try:
+                with open(module_xml, "r", encoding="utf-8") as f:
+                    existing = f.read()
+                # Regravar somente se faltar alguma das dependências críticas
+                needed_tokens = ["java.se", "jakarta.transaction.api"]
+                write_module_xml = any(tok not in existing for tok in needed_tokens)
+            except Exception:
+                write_module_xml = True
+        if write_module_xml:
             with open(module_xml, "w", encoding="utf-8") as f:
-                f.write(content)
-            log("module.xml criado para o driver PostgreSQL", "SUCCESS")
+                f.write(desired_module_xml)
+            log("module.xml do driver PostgreSQL criado/atualizado com dependências necessárias", "SUCCESS")
 
         # Se existir um template preconfigurado, renderizar e substituir standalone.xml
         wildfly_conf_dir = os.path.join(WILDFLY_DIR, "standalone", "configuration")
@@ -1159,17 +1278,12 @@ def configure_tomcat_postgres_datasource():
         os.makedirs(lib_dir, exist_ok=True)
         jar_path = os.path.join(lib_dir, jar_name)
         if not os.path.exists(jar_path):
-            try:
-                url = f"https://repo1.maven.org/maven2/org/postgresql/postgresql/{driver_version}/{jar_name}"
-                log(f"Baixando driver PostgreSQL para Tomcat: {url}", "INFO")
-                r = requests.get(url, stream=True, timeout=30)
-                r.raise_for_status()
-                with open(jar_path, "wb") as f:
-                    for chunk in r.iter_content(8192):
-                        f.write(chunk)
+            url = f"https://repo1.maven.org/maven2/org/postgresql/postgresql/{driver_version}/{jar_name}"
+            log(f"Baixando driver PostgreSQL para Tomcat: {url}", "INFO")
+            if http_download(url, jar_path, timeout=30, max_retries=3, backoff_seconds=2):
                 log("Driver PostgreSQL copiado para TOMCAT/lib", "SUCCESS")
-            except Exception as e:
-                log(f"Falha ao baixar driver para Tomcat: {e}", "ERROR")
+            else:
+                log("Falha ao baixar driver para Tomcat (verifique sua conexão e tente novamente)", "ERROR")
                 return False
 
         # Backup do context.xml
@@ -2418,11 +2532,12 @@ def download_tomcat_server(tomcat_version="10.1.35", destination_path=None):
         
         # Baixar o Tomcat
         log(f"Baixando Tomcat de: {tomcat_url}", "INFO")
-        with requests.get(tomcat_url, stream=True) as response:
-            response.raise_for_status()
-            with open(tomcat_zip, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192): 
-                    f.write(chunk)
+        if not http_download(tomcat_url, tomcat_zip, timeout=60, max_retries=3, backoff_seconds=3):
+            return {
+                "success": False,
+                "path": None,
+                "version": None
+            }
         
         # Extrair o arquivo ZIP
         log(f"Extraindo Tomcat para: {destination_path}", "INFO")
@@ -2970,7 +3085,6 @@ def main():
                                 print(f"{Colors.GREEN}Aplicação: http://localhost:{TOMCAT_PORT}/meu-projeto-java/{Colors.END}")
                                 process.wait()
                                 log("Tomcat finalizado.", "INFO")
-                                return True
                             except KeyboardInterrupt:
                                 log("Interrompido pelo usuário. Enviando shutdown ao Tomcat...", "INFO")
                                 try:
@@ -2980,7 +3094,6 @@ def main():
                                         subprocess.run([os.path.join(bin_dir, "shutdown.sh")], cwd=bin_dir)
                                 except Exception:
                                     pass
-                            return True
                 
                 # Copiar o WAR para o Tomcat
                 war_dest = os.path.join(tomcat_webapps, "meu-projeto-java.war")

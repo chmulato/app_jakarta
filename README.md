@@ -193,6 +193,26 @@ taskkill /F /PID <PID>
 - WildFly logs: `server/wildfly-*/standalone/log/server.log`
 - JSTL (Jakarta): use dependências `jakarta.servlet.jsp.jstl-*` (já no `pom.xml`).
 
+Erro: ModuleNotFoundError: No module named 'requests'
+- Você provavelmente executou com o Python global (fora da venv). Rode usando a venv:
+```powershell
+. .\.venv\Scripts\Activate.ps1
+python .\main.py
+```
+Ou sem ativar a venv (chamando o Python da venv diretamente):
+```powershell
+.\.venv\Scripts\python.exe .\main.py --only-check
+.\.venv\Scripts\python.exe .\main.py
+```
+Se a venv ainda não existir ou faltar pacotes, crie/atualize com:
+```powershell
+./setup-python.ps1
+```
+Teste rápido do pacote dentro da venv:
+```powershell
+.\.venv\Scripts\python.exe -c "import requests; print(requests.__version__)"
+```
+
 Documentação adicional: `doc/DEPLOY.md`, `doc/ARQUITETURA.md`, `doc/RESULTADOS-TESTES.md`.
 
 —
