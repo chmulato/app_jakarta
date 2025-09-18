@@ -18,6 +18,17 @@ import platform
 import shutil
 import time
 import logging
+# Se não estiver em venv, reexecuta com o Python da venv (se existir)
+try:
+    base = getattr(sys, "base_prefix", None) or getattr(sys, "real_prefix", None)
+    in_venv = base and sys.prefix != base
+    if not in_venv:
+        _venv_py = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".venv", "Scripts", "python.exe")
+        if os.path.exists(_venv_py) and os.path.abspath(sys.executable) != os.path.abspath(_venv_py):
+            print("Reexecutando com o Python da venv...")
+            os.execv(_venv_py, [_venv_py, __file__, *sys.argv[1:]])
+except Exception:
+    pass
 import tempfile
 import glob
 
