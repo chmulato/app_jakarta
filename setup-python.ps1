@@ -145,8 +145,10 @@ function Install-Requirements {
         & $VenvPy -m pip install --upgrade pip | Out-Null
     }
     
-    # Lista de pacotes críticos que devem ser instalados para validação de hash criptográfico
-    $criticalPackages = @('bcrypt')
+    # Pacotes críticos que devem estar presentes para o tooling do projeto
+    # - bcrypt: validações de hash
+    # - requests: HTTP client usado pelo main.py/setup
+    $criticalPackages = @('bcrypt','requests')
     
     if(Test-Path $ReqPath){
         Write-Info "Instalando dependencias ($([System.IO.Path]::GetFileName($ReqPath)))..."
@@ -264,8 +266,8 @@ function Test-Requirements {
         return
     }
     
-    # Pacotes críticos necessários para setup.dev.py funcionar, especialmente validação de hash criptográfico
-    $criticalPackages = @('bcrypt')
+    # Pacotes críticos necessários para o tooling do projeto
+    $criticalPackages = @('bcrypt','requests')
     
     $installed = @{}
     foreach($line in ($freeze -split "`n")){
