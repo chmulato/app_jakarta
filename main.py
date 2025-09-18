@@ -944,6 +944,39 @@ def configure_wildfly_postgres_datasource():
                 f.write(content)
             log("module.xml criado para o driver PostgreSQL", "SUCCESS")
 
+        # Se existir um template preconfigurado, renderizar e substituir standalone.xml
+        wildfly_conf_dir = os.path.join(WILDFLY_DIR, "standalone", "configuration")
+        template_candidates = [
+            os.path.join(WORKSPACE_DIR, 'bak', 'standalone_template_postgres.xml'),
+            os.path.join(wildfly_conf_dir, 'standalone_template_postgres.xml'),
+            os.path.join(wildfly_conf_dir, 'standalone.xml.bak'),
+        ]
+        template_path = next((p for p in template_candidates if os.path.exists(p)), None)
+        if template_path:
+            # Fazer backup do standalone.xml atual, se existir
+            if os.path.exists(standalone_xml):
+                backup_path = standalone_xml + ".bak"
+                if not os.path.exists(backup_path):
+                    shutil.copy2(standalone_xml, backup_path)
+                    log(f"Backup criado: {backup_path}", "INFO")
+
+            with open(template_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            # Renderizar placeholders
+            content = (content
+                .replace("__DB_HOST__", db_host)
+                .replace("__DB_PORT__", str(db_port))
+                .replace("__DB_NAME__", db_name)
+                .replace("__DB_USER__", db_user)
+                .replace("__DB_PASSWORD__", db_pass)
+            )
+            # Escrever standalone.xml
+            with open(standalone_xml, "w", encoding="utf-8") as f:
+                f.write(content)
+            log("standalone.xml gerado a partir do template de Postgres", "SUCCESS")
+            return True
+
+        # Caso nao exista template, seguir com a edicao XML incremental
         # Backup do standalone.xml
         backup_path = standalone_xml + ".bak"
         if not os.path.exists(backup_path):
@@ -1000,14 +1033,16 @@ def configure_wildfly_postgres_datasource():
             log("Driver 'postgresql' adicionado à seção <drivers>", "SUCCESS")
 
         # Garantir datasource PostgresDS
-        has_ds = any(localname(n.tag) == 'datasource' and (n.get('pool-name') == pool_name or n.get('jndi-name') == jndi_name) for n in datasources_node)
-        if not has_ds:
+        target_ds = None
+        for n in datasources_node:
+            if localname(n.tag) == 'datasource' and (n.get('pool-name') == pool_name or n.get('jndi-name') == jndi_name):
+                target_ds = n
+                break
+        if target_ds is None:
             ns_uri = datasources_node.tag.split('}', 1)[0][1:] if datasources_node.tag.startswith('{') else ''
             ds_tag = f"{{{ns_uri}}}datasource" if ns_uri else "datasource"
             cu_tag = f"{{{ns_uri}}}connection-url" if ns_uri else "connection-url"
             sec_tag = f"{{{ns_uri}}}security" if ns_uri else "security"
-            user_tag = f"{{{ns_uri}}}user-name" if ns_uri else "user-name"
-            pass_tag = f"{{{ns_uri}}}password" if ns_uri else "password"
             drv_tag = f"{{{ns_uri}}}driver" if ns_uri else "driver"
 
             ds_el = ET.SubElement(datasources_node, ds_tag, attrib={
@@ -1020,14 +1055,68 @@ def configure_wildfly_postgres_datasource():
             cu_el.text = f"jdbc:postgresql://{db_host}:{db_port}/{db_name}"
             drv_el = ET.SubElement(ds_el, drv_tag)
             drv_el.text = driver_name
+            # Em versões recentes do schema do WildFly, as credenciais devem ser atributos do elemento <security>
             sec_el = ET.SubElement(ds_el, sec_tag)
-            user_el = ET.SubElement(sec_el, user_tag)
-            user_el.text = db_user
-            pass_el = ET.SubElement(sec_el, pass_tag)
-            pass_el.text = db_pass
+            sec_el.set('user-name', db_user)
+            sec_el.set('password', db_pass)
             log("Datasource 'PostgresDS' adicionado ao standalone.xml", "SUCCESS")
         else:
-            log("Datasource 'PostgresDS' já existe no standalone.xml", "INFO")
+            # Normalizar e atualizar datasource existente
+            ds_el = target_ds
+            ns_uri = ds_el.tag.split('}', 1)[0][1:] if ds_el.tag.startswith('{') else ''
+            cu_tag = f"{{{ns_uri}}}connection-url" if ns_uri else "connection-url"
+            sec_tag = f"{{{ns_uri}}}security" if ns_uri else "security"
+            drv_tag = f"{{{ns_uri}}}driver" if ns_uri else "driver"
+
+            # connection-url
+            cu_el = None
+            for child in ds_el:
+                if localname(child.tag) == 'connection-url':
+                    cu_el = child
+                    break
+            if cu_el is None:
+                cu_el = ET.SubElement(ds_el, cu_tag)
+            cu_el.text = f"jdbc:postgresql://{db_host}:{db_port}/{db_name}"
+
+            # driver
+            drv_el = None
+            for child in ds_el:
+                if localname(child.tag) == 'driver':
+                    drv_el = child
+                    break
+            if drv_el is None:
+                drv_el = ET.SubElement(ds_el, drv_tag)
+            drv_el.text = driver_name
+
+            # security: garantir atributos user-name/password, removendo elementos filhos se existirem
+            sec_el = None
+            for child in ds_el:
+                if localname(child.tag) == 'security':
+                    sec_el = child
+                    break
+            if sec_el is None:
+                sec_el = ET.SubElement(ds_el, sec_tag)
+            # Ler valores de possíveis elementos filhos existentes
+            existing_user = sec_el.get('user-name')
+            existing_pass = sec_el.get('password')
+            # Coletar valores de elementos aninhados se presentes
+            nested_user = None
+            nested_pass = None
+            to_remove = []
+            for child in list(sec_el):
+                if localname(child.tag) == 'user-name':
+                    nested_user = (child.text or '').strip()
+                    to_remove.append(child)
+                elif localname(child.tag) == 'password':
+                    nested_pass = (child.text or '').strip()
+                    to_remove.append(child)
+            # Remover nós aninhados inválidos
+            for ch in to_remove:
+                sec_el.remove(ch)
+            # Definir atributos (preferir config atual do projeto)
+            sec_el.set('user-name', db_user or existing_user or nested_user or '')
+            sec_el.set('password', db_pass or existing_pass or nested_pass or '')
+            log("Datasource 'PostgresDS' já existia; parâmetros atualizados e credenciais normalizadas para atributos.", "INFO")
 
         # Salvar alterações
         tree.write(standalone_xml, encoding='utf-8', xml_declaration=True)
