@@ -1,175 +1,101 @@
-# Arquitetura de Servidores - Projeto Java
+docker-compose up -d postgres
+mvn clean compile -Ptomcat exec:java
+mvn clean package -Pwildfly wildfly:deploy
+# Arquitetura Atualizada do Projeto
 
 ## 📋 Visão Geral
+O projeto utiliza um script Python (`main.py`) como orquestrador central para:
+1. Verificação de ambiente (Java, Maven, Docker, PostgreSQL)
+2. Build e empacotamento (perfis Maven `tomcat`, `wildfly`, `run`)
+3. Deploy e diagnóstico em Tomcat ou WildFly
+4. Limpeza de artefatos e análise básica de runtime
 
-O projeto foi refatorado para suportar múltiplos servidores de aplicação (Tomcat e WildFly) de forma limpa e organizada, sem dependências hardcoded ou acoplamento desnecessário.
-
-## 🏗️ Estrutura de Arquitetura
-
-### 📁 Organização de Pacotes
-
+Os servidores agora ficam em `server/`:
 ```
-src/main/java/com/exemplo/
-├── server/                          # Pacote base para servidores
-│   ├── WebServerInterface.java      # Interface comum para servidores
-│   ├── AbstractWebServer.java       # Classe base com funcionalidades comuns
-│   ├── tomcat/                      # Implementações específicas do Tomcat
-│   │   └── WebServer.java           # Servidor Tomcat embedded (só no perfil tomcat)
-│   └── wildfly/                     # Implementações específicas do WildFly
-│       └── WildFlyServer.java       # Controle programático WildFly (opcional)
-├── servlet/                         # Servlets da aplicação (comum)
-├── dao/                            # Data Access Objects (comum)
-├── config/                         # Configurações (comum)
-└── model/                          # Modelos de dados (comum)
+server/
+ ├── apache-tomcat-10.1.35/
+ └── wildfly-37.0.1.Final/
 ```
 
-### 🎯 Principios Arquiteturais
-
-#### ✅ **Separação de Responsabilidades**
-- **Classes Comuns**: Não contêm dependências específicas de servidor
-- **Classes Específicas**: Isoladas em pacotes por servidor (`server/tomcat/`)
-- **Configurações**: Centralizadas no `pom.xml` via propriedades Maven
-
-#### ✅ **Compilação Condicional**
-- **Perfil WildFly**: Exclui pacote `**/server/tomcat/**` da compilação
-- **Perfil Tomcat**: Inclui todas as classes necessárias
-- **Resultado**: WildFly compila 12 arquivos, Tomcat compila 13 arquivos
-
-#### ✅ **Configuração via Propriedades**
-- **Portas**: Definidas no `pom.xml`, não hardcoded no código
-- **Override**: Suporte a propriedades de sistema (`-Dserver.port=8081`)
-- **Flexibilidade**: Fácil personalização por ambiente
-
-## ⚙️ Configurações de Porta
-
-### 📊 Portas Configuradas
-
+## 🗂️ Estrutura de Código Aplicação
 ```
-| Servidor    | Aplicação   | Administração | Configuração                 |
-|-------------|-------------|---------------|------------------------------|
-| **Tomcat**  | 8080        | N/A           | `pom.xml` → `tomcat.port`    |
-| **WildFly** | 9090        | 9990          | `standalone.xml` + `pom.xml` |
+meu-projeto-java/
+ ├── pom.xml
+ └── src/
+   ├── main/java/com/exemplo/
+   │   ├── servlet/      # Servlets e camadas web
+   │   ├── dao/          # Acesso a dados
+   │   ├── model/        # Entidades / modelos
+   │   └── config/       # Configurações gerais (se houver)
+   ├── main/resources/
+   └── main/webapp/      # JSP / WEB-INF / recursos estáticos
 ```
 
-### 🔧 Localização das Configurações
+Não há mais pacote `server/` com classes abstratas específicas; o controle de execução está encapsulado no fluxo Maven + script Python.
 
-#### Maven Properties (`pom.xml`)
-```xml
-<properties>
-    <tomcat.port>8080</tomcat.port>
-    <wildfly.http.port>9090</wildfly.http.port>
-    <wildfly.management.port>9990</wildfly.management.port>
-</properties>
-```
+## ⚙️ Portas Padrão (Atual)
+| Servidor | Porta HTTP | Porta Administração | Origem Configuração |
+|----------|------------|---------------------|--------------------|
+| Tomcat   | 9090       | N/A                 | Constante `TOMCAT_PORT` em `main.py` + `server.xml` ajustado dinamicamente |
+| WildFly  | 8080       | 9990                | WildFly `standalone.xml` (socket-binding) + constantes em `main.py` |
 
-#### Java Code (AbstractWebServer.java)
-```java
-protected int getConfiguredPort(int defaultPort) {
-    String portProperty = System.getProperty("server.port", String.valueOf(defaultPort));
-    return Integer.parseInt(portProperty);
-}
-```
+## 🔧 Overrides de Diretórios
+Precedência: argumento CLI > variável ambiente > padrão.
+| Tipo | Chave | Exemplo |
+|------|------|---------|
+| ENV  | `APP_TOMCAT_DIR` | `C:\servers\tomcat10` |
+| ENV  | `APP_WILDFLY_DIR` | `D:\infra\wildfly` |
+| ARG  | `--tomcat-dir` | `--tomcat-dir C:\custom\tomcat` |
+| ARG  | `--wildfly-dir` | `--wildfly-dir D:\wf` |
 
-#### WildFly Configuration (`standalone.xml`)
-```xml
-<socket-binding name="http" port="${jboss.http.port:9090}"/>
-<socket-binding name="management-http" port="${jboss.management.http.port:9990}"/>
-```
+## 🧩 Perfis Maven
+| Perfil | Objetivo |
+|--------|----------|
+| `tomcat` | Build para deploy em Tomcat (WAR + plugin tomcat10) |
+| `wildfly` | Build alinhado às bibliotecas do WildFly |
+| `run` | Execução rápida (Tomcat incorporado / desenvolvimento) |
 
-## 🚀 Execução
+## 🚀 Fluxo de Deploy (Tomcat)
+1. `mvn clean package -Ptomcat -DskipTests`
+2. Ajuste da porta em `conf/server.xml` (se necessário)
+3. WAR copiado para `webapps/`
+4. Inicialização (plugin ou startup script)
 
-### 🐱 Tomcat (Embedded)
-```bash
-# Porta padrão (8080)
-mvn clean compile -Ptomcat exec:java
+## 🏢 Fluxo de Deploy (WildFly)
+1. `mvn clean package -Pwildfly -DskipTests`
+2. WAR para `standalone/deployments/`
+3. Inicialização (plugin ou `standalone.bat`)
 
-# Porta customizada
-mvn clean compile -Ptomcat exec:java -Dserver.port=8081
+## 🛠️ Papel do Script `main.py`
+| Função | Detalhe |
+|--------|---------|
+| Verificação | Java / Maven / Docker / DB / perfis pom |
+| Build | Usa `execute_maven_command()` centralizado |
+| Deploy | Tomcat ou WildFly com opções interativas |
+| Diagnóstico | Leitura de logs, checagem de portas |
+| Limpeza | Remove WARs, `target/`, caches e diretórios temporários |
 
-# Via script
-.\iniciar-tomcat-perfil.ps1
-```
+## 🔍 Diagnóstico Integrado
+Funções: `diagnose_tomcat_issues()` e `diagnose_wildfly_issues()` examinam logs finais, estrutura de diretórios e portas em uso, sugerindo ações.
 
-### 🦬 WildFly (Standalone)
-```bash
-# Deploy padrão
-mvn clean package -Pwildfly wildfly:deploy
+## �️ Princípios Mantidos
+| Princípio | Aplicação Atual |
+|-----------|-----------------|
+| Minimizar acoplamento | Servidores tratados externamente via script |
+| Configuração externa | Portas e caminhos podem ser sobrescritos |
+| Observabilidade | Log unificado em `log/maven_deploy.log` |
+| Reprodutibilidade | Build determinístico via perfis Maven |
 
-# Via script
-.\iniciar-wildfly-perfil.ps1
-```
+## 🔄 Evolução em Relação à Versão Anterior
+- Removidas referências a classes `AbstractWebServer`, `WebServerInterface` (não presentes na árvore atual)
+- Centralização operacional no script Python em vez de lógica Java embarcada
+- Portas invertidas (Tomcat agora 9090 para evitar conflito com WildFly 8080)
+- Simplificação: Foco em WAR padrão + plugin ou servidor standalone
 
-## 🌐 URLs de Acesso
+## � Possíveis Extensões Futuras
+- Parametrização de portas via argumentos (`--tomcat-port`, `--wildfly-port`)
+- Geração automatizada de relatório de cobertura consolidado
+- Endpoint de health-check simples
 
-| Servidor | URL da Aplicação | URL de Administração |
-|----------|------------------|---------------------|
-| **Tomcat** | http://localhost:8080/ | N/A |
-| **WildFly** | http://localhost:9090/meu-projeto-java | http://localhost:9990/console |
-
-## ✅ Vantagens da Nova Arquitetura
-
-### 🎯 **Flexibilidade**
-- ✓ Suporte a múltiplos servidores sem conflito
-- ✓ Configuração centralizada e personalizável
-- ✓ Compilação condicional por perfil
-
-### 🔧 **Manutenibilidade**
-- ✓ Código específico isolado por servidor
-- ✓ Interface comum para funcionalidades básicas
-- ✓ Remoção de dependências hardcoded
-
-### 🏗️ **Extensibilidade**
-- ✓ Fácil adição de novos servidores (ex: Jetty)
-- ✓ Padrão Template Method para implementações
-- ✓ Configuração via propriedades Maven
-
-### 🛡️ **Robustez**
-- ✓ Tratamento de erros centralizado
-- ✓ Logging consistente via Log4j2
-- ✓ Validação de configurações
-
-## 📝 Scripts Disponíveis
-
-| Script | Função | Servidor |
-|--------|--------|----------|
-| `iniciar-tomcat-perfil.ps1` | Deploy automático Tomcat | Tomcat |
-| `iniciar-wildfly-perfil.ps1` | Deploy automático WildFly | WildFly |
-| `configuracoes-portas.ps1` | Documentação das configurações | Ambos |
-| `testar-portas.ps1` | Teste de disponibilidade de portas | Ambos |
-
-## 🔄 Exemplos de Uso
-
-### Desenvolvimento Local
-```bash
-# PostgreSQL
-docker-compose up -d postgres
-
-# Tomcat (desenvolvimento rápido)
-mvn clean compile -Ptomcat exec:java
-
-# WildFly (ambiente similar à produção)
-mvn clean package -Pwildfly wildfly:deploy
-```
-
-### 🔧 Personalização de Ambiente
-```bash
-# Tomcat em porta diferente
-mvn clean compile -Ptomcat exec:java -Dserver.port=8081
-
-# WildFly com configuração customizada
-mvn clean package -Pwildfly wildfly:deploy
-
-# WildFly programático com caminho customizado
-mvn clean compile -Pwildfly-embedded exec:java \
-  -Dwildfly.home=/meu/wildfly \
-  -Dserver.port=9091 \
-  -Dwildfly.management.port=9991
-```
-
-## 🎉 Resultado
-
-A arquitetura agora é:
-- ✅ **Limpa**: Sem dependências desnecessárias entre servidores
-- ✅ **Flexível**: Configuração via propriedades, não hardcoded
-- ✅ **Escalável**: Fácil adição de novos servidores
-- ✅ **Robusta**: Compilação condicional por perfil Maven
+## ✅ Resumo
+Arquitetura simplificada, centrada em automação externa, com flexibilidade para múltiplos ambientes e fácil evolução.

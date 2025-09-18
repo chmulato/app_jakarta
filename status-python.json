@@ -1,0 +1,16 @@
+﻿{
+    "timestamp":  "2025-09-17T16:42:35.1928797-03:00",
+    "scriptVersion":  "1.0.0",
+    "status":  {
+                   "Python":  "OK",
+                   "PythonVersion":  "3.13.7",
+                   "Venv":  "NOK",
+                   "Pip":  "NOK",
+                   "Requirements":  "requirements.txt",
+                   "MissingPackages":  [
+
+                                       ],
+                   "DuracaoSeg":  0.54
+               },
+    "host":  "NOTEBOOK_TEO"
+}

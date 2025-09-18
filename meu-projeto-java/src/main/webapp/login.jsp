@@ -365,13 +365,13 @@
                 <div class="col-12 mb-2">
                   <div class="d-flex align-items-center">
                     <i class="bi bi-person-fill text-muted me-2"></i>
-                    <code class="bg-transparent text-dark">admin@exemplo.com</code>
+                    <code class="bg-transparent text-dark">admin@meuapp.com</code>
                   </div>
                 </div>
                 <div class="col-12 mb-3">
                   <div class="d-flex align-items-center">
                     <i class="bi bi-key-fill text-muted me-2"></i>
-                    <code class="bg-transparent text-dark">senha123</code>
+                    <code class="bg-transparent text-dark">Admin@123</code>
                   </div>
                 </div>
                 <div class="col-12">
@@ -408,10 +408,14 @@
       }
     }
     
+    // Constantes demo centralizadas
+    const DEMO_EMAIL = 'admin@meuapp.com';
+    const DEMO_PASSWORD = 'Admin@123';
+
     // Fill demo credentials
     function fillDemoCredentials() {
-      document.getElementById('email').value = 'admin@exemplo.com';
-      document.getElementById('senha').value = 'senha123';
+      document.getElementById('email').value = DEMO_EMAIL;
+      document.getElementById('senha').value = DEMO_PASSWORD;
       
       // Focus no botão de login
       document.getElementById('btnLogin').focus();
@@ -432,7 +436,7 @@
     
     // Show forgot password modal/alert
     function showForgotPassword() {
-      alert('💡 Para demonstração, use as credenciais:\n\nEmail: admin@exemplo.com\nSenha: senha123\n\nEm um sistema real, aqui seria enviado um link para recuperação de senha.');
+      alert('💡 Para demonstração, use as credenciais:\n\nEmail: ' + DEMO_EMAIL + '\nSenha: ' + DEMO_PASSWORD + '\n\nEm um sistema real, aqui seria enviado um link para recuperação de senha.');
     }
     
     // Form submission with loading state

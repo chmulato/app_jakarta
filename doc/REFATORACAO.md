@@ -1,5 +1,24 @@
 # Refatoração dos Scripts de Deployment
 
+## Linha do Tempo
+
+| Data | Marco |
+|------|-------|
+| 16/09/2025 | Refatoração inicial de scripts PowerShell e perfis Maven |
+| 17/09/2025 | Introdução do orquestrador Python `main.py` consolidando build/deploy/test |
+
+## Estado Atual
+O gerenciamento principal de build, deploy, diagnóstico e limpeza foi migrado para `main.py`, reduzindo dependência de múltiplos scripts PowerShell. Os scripts antigos permanecem como referência histórica ou uso pontual e poderão ser removidos/arquivados posteriormente.
+
+### Motivação da Migração
+| Problema Anterior | Solução Atual |
+|-------------------|---------------|
+| Duplicação de lógica entre vários `.ps1` | Centralização em funções Python reutilizáveis |
+| Dificuldade em aplicar overrides dinâmicos | Suporte a args CLI (`--tomcat-dir`, `--wildfly-dir`, `--only-check`) |
+| Logs fragmentados | Log unificado `log/maven_deploy.log` |
+| Ajuste manual de portas | Tomcat porta configurada automaticamente durante deploy |
+| Diagnóstico manual de falhas | Funções `diagnose_tomcat_issues()` e `diagnose_wildfly_issues()` |
+
 ## Mudanças Realizadas - 16 de setembro de 2025
 
 ### 1. Remoção de XML do Maven no PowerShell
@@ -43,7 +62,7 @@
 - `doc\MAVEN-COMANDOS.md`: Documentação detalhada dos comandos Maven
 - `Execute-RefactoredDeployment.ps1`: Script para testar a refatoração
 
-## Como Usar
+## Como Usar (LEGADO / PowerShell)
 
 ### Método 1: Script Start-App.ps1 (Interface Completa)
 ```powershell
@@ -74,10 +93,27 @@
 .\Execute-RefactoredDeployment.ps1
 ```
 
-## Perfis Maven
-O projeto agora utiliza dois perfis Maven no pom.xml:
+## Perfis Maven (Atual)
+Perfis disponíveis:
+- `tomcat`
+- `wildfly`
+- `run`
 
-1. **tomcat**: Contém configurações e dependências para o Tomcat 10
-2. **wildfly**: Contém configurações e dependências para o WildFly 37
+Ver documentação em `doc/MAVEN-COMANDOS.md` para comandos revisados.
 
-Ative-os com `-Ptomcat` ou `-Pwildfly` nos comandos Maven ou use os scripts auxiliares.
+## Uso Recomendado (Atual)
+```powershell
+# Menu interativo
+python .\main.py
+
+# Apenas verificar ambiente
+python .\main.py --only-check
+
+# Override diretórios
+python .\main.py --tomcat-dir C:\servers\tomcat10 --wildfly-dir C:\servers\wildfly37
+```
+
+## Próximos Passos Sugeridos
+- Descontinuar scripts não utilizados após período de transição
+- Adicionar testes automatizados para funções Python críticas
+- Parametrizar portas por argumentos (`--tomcat-port`, `--wildfly-port`)

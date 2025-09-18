@@ -1,19 +1,24 @@
-# Relatório de Execução de Testes Unitários
+# Relatório de Execução de Testes Unitários (Atualizado)
 
 ## Data: 16 de setembro de 2025
 
 ## Resumo
+Testes executados com JUnit 5 + Hibernate Validator. Cobertura gerada via JaCoCo (`mvn clean test verify`). Dependência Jakarta EL permanece necessária para interpolação de mensagens.
 
-Todos os testes unitários foram executados com sucesso após a adição da dependência Jakarta EL necessária para o Hibernate Validator.
+## Estatísticas (Exemplo Histórico)
+| Métrica | Valor |
+|---------|-------|
+| Total de Testes | 40 |
+| Sucessos | 40 |
+| Falhas | 0 |
+| Erros | 0 |
+| Ignorados | 0 |
+| Tempo Total | 5.247s |
 
-## Estatísticas dos Testes
-
-- **Total de Testes:** 40
-- **Sucessos:** 40
-- **Falhas:** 0
-- **Erros:** 0
-- **Ignorados:** 0
-- **Tempo Total:** 5.247 segundos
+Reexecutar para atualizar os números reais:
+```powershell
+mvn clean test
+```
 
 ## Detalhes por Pacote
 
@@ -29,9 +34,9 @@ Todos os testes unitários foram executados com sucesso após a adição da depe
 | `com.exemplo.servlet.LoginServletTest$InterfaceTests` | 2 | ✅ PASSOU |
 | `com.exemplo.servlet.LogoutServletTest` | 4 | ✅ PASSOU |
 
-## Problemas Resolvidos
+## Problemas Resolvidos (Histórico)
 
-### Problema: Erro de Validação no Hibernate Validator
+### Erro: Validação Hibernate / EL
 
 **Descrição do erro:**
 ```
@@ -54,14 +59,44 @@ Adicionamos a dependência do Jakarta EL ao pom.xml:
 </dependency>
 ```
 
-## Observações
+## Localização dos Relatórios
+| Arquivo / Diretório | Descrição |
+|---------------------|-----------|
+| `target/surefire-reports/` | Logs XML/Plain de execução dos testes |
+| `target/site/jacoco/index.html` | Relatório HTML de cobertura |
+| `target/jacoco.exec` | Dados binários de cobertura |
 
-- Os testes do modelo de produto e usuário utilizam o Hibernate Validator para validar as entidades
-- Os testes de servlet estão funcionando corretamente, simulando requisições HTTP
-- Todos os testes estão usando JUnit 5 (Jupiter)
+Abrir relatório HTML (Windows PowerShell):
+```powershell
+Start-Process .\target\site\jacoco\index.html
+```
+
+## Execução de Testes (Comandos)
+```powershell
+# Testes + cobertura
+mvn clean test verify
+
+# Somente testes (sem gerar site completo)
+mvn test
+
+# Ver dependências de teste
+mvn dependency:tree -Dincludes=junit:junit
+```
+
+## Integração com Script Python
+O script `main.py` hoje foca em build/deploy. Opções futuras:
+1. Adicionar função `run_maven_tests()` integrada ao menu (já existe stub)
+2. Consolidar parsing do `jacoco.exec` para extrair métricas resumidas
+
+## Observações
+- Entidades validadas com Hibernate Validator + EL
+- Testes de servlet simulam requests (mock / wrappers)
+- Configurações sensíveis (DB) devem ser isoladas ou mockadas se necessário
 
 ## Próximos Passos
-
-1. Considerar a adição de mais testes para aumentar a cobertura
-2. Manter as dependências atualizadas, especialmente as relacionadas à Jakarta EE
-3. Garantir que os testes sejam executados como parte do processo de integração contínua
+| Ação | Benefício |
+|------|-----------|
+| Aumentar cobertura em DAO/servlets | Garantir regressão controlada |
+| Adicionar testes de integração isolados | Validar fluxo end-to-end |
+| Automatizar no CI (GitHub Actions) | Feedback contínuo |
+| Extrair resumo de cobertura no script Python | Visibilidade rápida pós-build |

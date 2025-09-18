@@ -303,8 +303,8 @@
             </a>
             <div class="text-start">
               <small class="opacity-75">
-                <strong>Demo:</strong> admin@exemplo.com<br>
-                <strong>Senha:</strong> senha123
+                <strong>Demo:</strong> admin@meuapp.com<br>
+                <strong>Senha:</strong> Admin@123
               </small>
             </div>
           </div>

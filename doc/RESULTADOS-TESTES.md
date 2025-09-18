@@ -1,7 +1,10 @@
-# Resultados dos Testes de Deploy
+# Resultados dos Testes de Deploy (Atualizado)
 
-## 📅 Data do Teste
-**16 de setembro de 2025 - 11:40**
+## 📅 Histórico
+| Data | Contexto |
+|------|----------|
+| 16/09/2025 | Testes pós-refatoração inicial (scripts PowerShell) |
+| 17/09/2025 | Ajuste portas (Tomcat→9090 / WildFly→8080), adoção de `main.py` |
 
 ## 🎯 Objetivo
 Testar o deploy da aplicação Java nos servidores Tomcat e WildFly após refatoração da arquitetura.
@@ -14,40 +17,45 @@ Testar o deploy da aplicação Java nos servidores Tomcat e WildFly após refato
 
 ## 📊 Resultados por Servidor
 
-### 🐺 WildFly 37.0.1.Final
+### 🐺 WildFly 37.0.1.Final (Porta HTTP 8080 / Mgmt 9990)
 
 | Aspecto | Status | Detalhes |
 |---------|--------|----------|
 | **Compilação** | ✅ **SUCESSO** | Maven profile `-Pwildfly` |
 | **Deploy** | ✅ **SUCESSO** | `wildfly:deploy` executado |
-| **Servidor** | ✅ **RODANDO** | Porta 9090 (app) + 9990 (management) |
+| **Servidor** | ✅ **RODANDO** | Porta 8080 (app) + 9990 (management) |
 | **Banco de Dados** | ✅ **CONECTADO** | PostgreSQL integração OK |
 | **Acesso Web** | ✅ **ACESSÍVEL** | http://localhost:9090/meu-projeto-java |
 | **Configuração** | ✅ **FLEXÍVEL** | Sem hardcode, via properties |
 
 **Comando executado:**
-```bash
+```powershell
 mvn clean package -Pwildfly wildfly:deploy -DskipTests
+# ou via script
+python .\main.py (opção 4)
 ```
 
 **Resultado:** BUILD SUCCESS ✅
 
 ---
 
-### 🍅 Tomcat Embedded
+### 🍅 Tomcat (Porta 9090)
 
 | Aspecto | Status | Detalhes |
 |---------|--------|----------|
 | **Compilação** | ✅ **SUCESSO** | Maven profile `-Ptomcat` |
-| **Servidor** | ✅ **INICIADO** | Porta 8080 |
+| **Servidor** | ✅ **INICIADO** | Porta 9090 |
 | **Banco de Dados** | ✅ **CONECTADO** | PostgreSQL integração OK |
 | **JPA/Hibernate** | ✅ **SUCESSO** | Dependência adicionada |
 | **Acesso Web** | ✅ **ACESSÍVEL** | Servidor completamente funcional |
 | **Configuração** | ✅ **FLEXÍVEL** | Sem hardcode, via properties |
 
 **Comando executado:**
-```bash
-mvn clean compile -Ptomcat exec:java
+```powershell
+mvn clean package -Ptomcat -DskipTests
+mvn tomcat10:run -Ptomcat -Dmaven.tomcat.port=9090
+# ou via script
+python .\main.py (opção 2)
 ```
 
 **Correção aplicada:**
@@ -84,23 +92,15 @@ src/main/java/
 
 ---
 
-## 🎯 Status Final
-
-### ✅ **WildFly: PRODUÇÃO READY**
-- Deploy completo e funcional
-- Aplicação acessível
-- Banco de dados integrado
-- Configuração flexível
-
-### ✅ **Tomcat: PRODUÇÃO READY**
-- Servidor funcional
-- Banco conectado
-- Dependência JPA adicionada e testada
-- Classe `TesteHibernate` confirma solução
+## 🎯 Status Atual
+| Servidor | Status | Observação |
+|----------|--------|------------|
+| WildFly  | ✅ Pronto | Deploy consistente via plugin ou script |
+| Tomcat   | ✅ Pronto | Porta ajustada dinamicamente (9090) |
 
 ---
 
-## ✅ Correção Implementada
+## ✅ Correções Importantes (Históricas)
 
 Adicionamos a dependência que faltava ao perfil do Tomcat:
 ```xml
@@ -111,7 +111,7 @@ Adicionamos a dependência que faltava ao perfil do Tomcat:
 </dependency>
 ```
 
-**Resultado do teste:**
+**Resultado do teste histórico:**
 ```
 Iniciando teste do Hibernate Commons Annotations...
 ✅ Classe ReflectionManager carregada com sucesso: org.hibernate.annotations.common.reflection.ReflectionManager
@@ -120,14 +120,17 @@ Iniciando teste do Hibernate Commons Annotations...
 Teste concluído com sucesso! A dependência hibernate-commons-annotations está funcionando.
 ```
 
-2. **Testes de Funcionalidade:**
-   - Login/logout
-   - CRUD operations
-   - Performance testing
+## 🔍 Execução de Testes (Atual)
+```powershell
+mvn clean test verify
+# Relatório cobertura: target/site/jacoco/index.html
+```
 
-3. **Documentação:**
-   - Guias de deploy
-   - Troubleshooting comum
+Ou usando script (build sem testes + depois testes separados):
+```powershell
+python .\main.py --only-check
+mvn test
+```
 
 ---
 

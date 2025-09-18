@@ -1,6 +1,6 @@
-# Comandos Maven para Configuração, Build e Deploy
+# Comandos Maven - Guia Atualizado
 
-Este documento serve como referência para os comandos Maven utilizados no projeto, detalhando as opções para configuração, build e deploy nos servidores Tomcat 10 e WildFly.
+Este guia resume os comandos Maven efetivamente usados no fluxo automatizado (`main.py`) e manual para build, testes e deploy em Tomcat (porta 9090) e WildFly (porta 8080 / mgmt 9990).
 
 ## Índice
 
@@ -13,10 +13,13 @@ Este documento serve como referência para os comandos Maven utilizados no proje
 
 ## Perfis Maven
 
-O projeto utiliza perfis Maven para separar as configurações específicas de cada servidor de aplicação:
+| Perfil | Uso | Observação |
+|--------|-----|------------|
+| `tomcat` | Build + deploy WAR para Tomcat | Usa plugin `tomcat10-maven-plugin` |
+| `wildfly` | Build para WildFly | Usa plugin `wildfly-maven-plugin` |
+| `run` | Execução rápida (Tomcat incorporado/embedded) | Usado em desenvolvimento |
 
-- **tomcat**: Contém configurações, dependências e plugins específicos para o Apache Tomcat 10.1.35
-- **wildfly**: Contém configurações, dependências e plugins específicos para o WildFly 37.0.1
+Verifique presença no `pom.xml` (o script `main.py` alerta se ausente).
 
 ## Comandos Básicos
 
@@ -39,20 +42,23 @@ mvn compile
 ### Build e Empacotamento
 
 ```bash
-# Build completo (sem executar testes)
+# Build completo (sem testes)
 mvn clean package -DskipTests
 
-# Build com testes
+# Build completo (com testes)
 mvn clean package
 
-# Build específico para Tomcat
+# Tomcat
 mvn clean package -Ptomcat -DskipTests
 
-# Build específico para WildFly
+# WildFly
 mvn clean package -Pwildfly -DskipTests
+
+# Execução rápida (embedded)
+mvn -Prun
 ```
 
-## Comandos para Tomcat 10
+## Comandos para Tomcat 10 (Porta 9090)
 
 ### Build e Deploy para Tomcat 10
 
@@ -60,17 +66,20 @@ mvn clean package -Pwildfly -DskipTests
 # Compilar e empacotar para Tomcat 10
 mvn clean package -Ptomcat -DskipTests
 
-# Iniciar Tomcat 10 embarcado via plugin
-mvn tomcat10:run -Ptomcat
+# Iniciar (plugin Maven)
+mvn tomcat10:run -Ptomcat -Dmaven.tomcat.port=9090
 
-# Compilar, empacotar e iniciar Tomcat 10 em um único comando
-mvn clean package tomcat10:run -Ptomcat -DskipTests
+# Build + run
+mvn clean package tomcat10:run -Ptomcat -DskipTests -Dmaven.tomcat.port=9090
 
-# Iniciar Tomcat 10 com WAR já empacotado
-mvn tomcat10:run-war -Ptomcat -Dmaven.tomcat.port=8080
+# Run WAR empacotado
+mvn tomcat10:run-war -Ptomcat -Dmaven.tomcat.port=9090
 
-# Executar a classe WebServer (para Tomcat embarcado)
-mvn exec:java -Ptomcat -Dexec.mainClass="com.exemplo.server.tomcat.WebServer"
+# Execução via perfil rápido (se configurado)
+mvn -Prun
+
+# Via script Python (recomendado)
+python .\main.py  (menu → opção 2 ou 3)
 ```
 
 ### Opções Alternativas para Tomcat 10
@@ -83,7 +92,7 @@ mvn -X clean package tomcat10:run-war -Ptomcat -DskipTests
 mvn clean compile war:war tomcat10:run -Ptomcat -DskipTests
 ```
 
-## Comandos para WildFly
+## Comandos para WildFly (Porta 8080 / Mgmt 9990)
 
 ### Build e Deploy para WildFly
 
@@ -104,11 +113,14 @@ mvn clean package -Pwildfly wildfly:deploy -DskipTests
 ### Opções para Configuração do WildFly
 
 ```bash
-# Configurar porta HTTP
-mvn -Pwildfly -Djboss.http.port=9090 wildfly:deploy
+# Alterar porta HTTP (exemplo)
+mvn -Pwildfly -Djboss.http.port=8180 wildfly:deploy
 
-# Configurar porta de administração
-mvn -Pwildfly -Djboss.management.port=9990 wildfly:deploy
+# Alterar porta management
+mvn -Pwildfly -Djboss.management.http.port=10090 wildfly:deploy
+
+# Via script Python
+python .\main.py  (menu → opção 4 ou 5)
 ```
 
 ## Parâmetros Comuns
@@ -117,8 +129,8 @@ mvn -Pwildfly -Djboss.management.port=9990 wildfly:deploy
 |-----------|-----------|---------|
 | `-DskipTests` | Pula a execução de testes unitários | `mvn package -DskipTests` |
 | `-X` | Modo debug (saída detalhada) | `mvn -X clean package` |
-| `-Dmaven.tomcat.port=8080` | Define a porta do Tomcat | `mvn tomcat10:run -Dmaven.tomcat.port=8080` |
-| `-Djboss.http.port=9090` | Define a porta HTTP do WildFly | `mvn -Djboss.http.port=9090` |
+| `-Dmaven.tomcat.port=9090` | Porta do Tomcat (plugin) | `mvn tomcat10:run -Dmaven.tomcat.port=9090` |
+| `-Djboss.http.port=8080` | Porta HTTP WildFly | `mvn -Pwildfly -Djboss.http.port=8080 wildfly:deploy` |
 | `-Dexec.mainClass` | Define a classe principal para exec:java | `mvn exec:java -Dexec.mainClass="com.exemplo.Main"` |
 
 ## Solução de Problemas
@@ -142,13 +154,19 @@ mvn -Pwildfly -Djboss.management.port=9990 wildfly:deploy
 ### Comandos de Recuperação
 
 ```bash
-# Limpar completamente o projeto
+# Limpeza completa
 mvn clean
 
-# Forçar atualização de dependências
+# Forçar atualização
 mvn clean package -U -DskipTests
 
-# Verificar problemas de plugin
+# Descrever plugin
 mvn help:describe -Dplugin=wildfly
 mvn help:describe -Dplugin=tomcat10
+
+# Executar testes com relatório JaCoCo
+mvn clean test verify
+
+# Usar script Python para ambiente + build
+python .\main.py --only-check
 ```
