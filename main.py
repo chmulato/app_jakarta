@@ -96,7 +96,9 @@ class Colors:
     GREEN = '\033[92m'
     WARNING = '\033[93m'
     YELLOW = '\033[93m'  # Mesma cor do WARNING
+    RED = '\033[91m'
     FAIL = '\033[91m'
+    GRAY = '\033[90m'
     END = '\033[0m'
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
@@ -128,6 +130,98 @@ def log(message, level="INFO"):
         logger.info(message)
     
     print(f"{timestamp} - {color}{level}{Colors.END}: {message}")
+
+def load_db_config_from_compose():
+    """
+    Lê credenciais do PostgreSQL a partir do `docker-compose.yml`.
+    Prioridade: variáveis de ambiente APP_DB_* > docker-compose.yml > defaults.
+
+    Retorna:
+        dict: {host, port, name, user, password}
+    """
+    # Defaults
+    cfg = {
+        "host": os.environ.get("APP_DB_HOST", "localhost"),
+        "port": os.environ.get("APP_DB_PORT", "5432"),
+        "name": os.environ.get("APP_DB_NAME", "postgres"),
+        "user": os.environ.get("APP_DB_USER", "postgres"),
+        "password": os.environ.get("APP_DB_PASSWORD", "postgres"),
+    }
+
+    compose_path = os.path.join(WORKSPACE_DIR, "docker-compose.yml")
+    if not os.path.exists(compose_path):
+        return cfg
+
+    try:
+        try:
+            import importlib
+            yaml = importlib.import_module('yaml')  # dynamic import
+        except Exception:
+            log("PyYAML não instalado; usando defaults/env para DB.", "WARNING")
+            return cfg
+
+        with open(compose_path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+
+        services = data.get("services", {}) if isinstance(data, dict) else {}
+        svc = None
+        for key in ("postgres", "db", "database"):
+            if key in services:
+                svc = services[key]
+                break
+        if not isinstance(svc, dict):
+            return cfg
+
+        # environment pode ser dict ou lista
+        env_block = svc.get("environment", {})
+        env_map = {}
+        if isinstance(env_block, dict):
+            env_map = env_block
+        elif isinstance(env_block, list):
+            for item in env_block:
+                if isinstance(item, str) and "=" in item:
+                    k, v = item.split("=", 1)
+                    env_map[k] = v
+
+        # ports: tentar extrair hostPort se mapeado "host:container" com container 5432
+        host_port = None
+        ports = svc.get("ports", [])
+        if isinstance(ports, list):
+            for p in ports:
+                if isinstance(p, str) and ":" in p:
+                    hp, cp = p.split(":", 1)
+                    # remover aspas ou espaços
+                    hp = hp.strip().strip('"')
+                    cp = cp.strip().strip('"')
+                    if cp == "5432" or cp.endswith("5432"):
+                        host_port = hp
+                        break
+
+        cfg_from_compose = {
+            "host": cfg["host"],
+            "port": host_port or cfg["port"],
+            "name": env_map.get("POSTGRES_DB", cfg["name"]),
+            "user": env_map.get("POSTGRES_USER", cfg["user"]),
+            "password": env_map.get("POSTGRES_PASSWORD", cfg["password"]),
+        }
+
+        # Aplicar overrides finais por variáveis de ambiente, se presentes
+        for key, env_name in (
+            ("host", "APP_DB_HOST"),
+            ("port", "APP_DB_PORT"),
+            ("name", "APP_DB_NAME"),
+            ("user", "APP_DB_USER"),
+            ("password", "APP_DB_PASSWORD"),
+        ):
+            val = os.environ.get(env_name)
+            if val:
+                cfg_from_compose[key] = val
+
+        return cfg_from_compose
+    except Exception as e:
+        # Em caso de erro, manter defaults/env
+        log(f"Falha ao ler docker-compose.yml para DB: {e}", "WARNING")
+        return cfg
 
 def check_maven_installed():
     """
@@ -346,21 +440,13 @@ def check_database_connection():
         if not output:
             return False, "Contêiner PostgreSQL não está em execução"
             
-        # Verificar o arquivo docker-compose.yml para obter informações do banco
-        docker_compose_path = os.path.join(WORKSPACE_DIR, "docker-compose.yml")
-        db_host = "localhost"
-        db_port = "5432"
-        db_name = "postgres"
-        db_user = "postgres"
-        db_password = "postgres"
-        
-        if os.path.exists(docker_compose_path):
-            with open(docker_compose_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-                # Extrair informações do banco se disponíveis
-                if "POSTGRES_DB" in content and "POSTGRES_USER" in content:
-                    # Aqui você poderia analisar o arquivo YAML para obter os valores exatos
-                    log("Informações do banco encontradas no docker-compose.yml", "INFO")
+        # Carregar dados do docker-compose.yml (ou env) para obter informações do banco
+        db_cfg = load_db_config_from_compose()
+        db_host = db_cfg["host"]
+        db_port = str(db_cfg["port"]) if isinstance(db_cfg["port"], int) else db_cfg["port"]
+        db_name = db_cfg["name"]
+        db_user = db_cfg["user"]
+        db_password = db_cfg["password"]
         
         # Aqui você poderia tentar conectar ao banco usando psycopg2 ou outro driver
         # Se o módulo psycopg2 estiver instalado
@@ -794,6 +880,264 @@ def setup_wildfly_environment():
     
     return env
 
+def configure_wildfly_postgres_datasource():
+    """
+    Configura um datasource PostgreSQL no WildFly editando o arquivo standalone.xml
+    e garante a presença do driver em modules/org/postgresql.
+    Usa defaults e variáveis de ambiente: APP_DB_HOST, APP_DB_PORT, APP_DB_NAME, APP_DB_USER, APP_DB_PASSWORD.
+
+    Returns:
+        bool: True se configurado com sucesso, False caso contrário
+    """
+    try:
+        standalone_xml = os.path.join(WILDFLY_DIR, "standalone", "configuration", "standalone.xml")
+        if not os.path.exists(standalone_xml):
+            log(f"Arquivo standalone.xml não encontrado: {standalone_xml}", "ERROR")
+            return False
+
+        # Parâmetros do banco: preferir docker-compose.yml com override por env
+        db_cfg = load_db_config_from_compose()
+        db_host = db_cfg["host"]
+        db_port = str(db_cfg["port"]) if isinstance(db_cfg["port"], int) else db_cfg["port"]
+        db_name = db_cfg["name"]
+        db_user = db_cfg["user"]
+        db_pass = db_cfg["password"]
+        jndi_name = "java:/jdbc/PostgresDS"
+        pool_name = "PostgresDS"
+        driver_name = "postgresql"
+        module_name = "org.postgresql"
+
+        # Garantir módulo do driver
+        module_dir = os.path.join(WILDFLY_DIR, "modules", "system", "layers", "base", *module_name.split("."), "main")
+        os.makedirs(module_dir, exist_ok=True)
+        driver_version = "42.7.4"
+        jar_name = f"postgresql-{driver_version}.jar"
+        jar_path = os.path.join(module_dir, jar_name)
+        module_xml = os.path.join(module_dir, "module.xml")
+
+        if not os.path.exists(jar_path):
+            try:
+                url = f"https://repo1.maven.org/maven2/org/postgresql/postgresql/{driver_version}/{jar_name}"
+                log(f"Baixando driver PostgreSQL: {url}", "INFO")
+                r = requests.get(url, stream=True, timeout=30)
+                r.raise_for_status()
+                with open(jar_path, "wb") as f:
+                    for chunk in r.iter_content(8192):
+                        f.write(chunk)
+                log("Driver PostgreSQL baixado para o módulo do WildFly", "SUCCESS")
+            except Exception as e:
+                log(f"Falha ao baixar driver PostgreSQL: {e}", "ERROR")
+                return False
+
+        if not os.path.exists(module_xml):
+            content = f"""
+<module xmlns="urn:jboss:module:1.9" name="{module_name}">
+  <resources>
+    <resource-root path="{jar_name}"/>
+  </resources>
+  <dependencies>
+    <module name="jakarta.transaction.api"/>
+  </dependencies>
+</module>
+""".strip()
+            with open(module_xml, "w", encoding="utf-8") as f:
+                f.write(content)
+            log("module.xml criado para o driver PostgreSQL", "SUCCESS")
+
+        # Backup do standalone.xml
+        backup_path = standalone_xml + ".bak"
+        if not os.path.exists(backup_path):
+            shutil.copy2(standalone_xml, backup_path)
+            log(f"Backup criado: {backup_path}", "INFO")
+
+        import xml.etree.ElementTree as ET
+        tree = ET.parse(standalone_xml)
+        root = tree.getroot()
+
+        def localname(tag):
+            return tag.split('}', 1)[1] if tag.startswith('{') else tag
+
+        # Encontrar subsistema de datasources
+        ds_subsystem = None
+        for elem in root.iter():
+            if localname(elem.tag) == 'subsystem' and elem.tag.startswith('{') and 'datasources' in elem.tag:
+                ds_subsystem = elem
+                break
+
+        if ds_subsystem is None:
+            log("Subsystem de datasources não encontrado no standalone.xml", "ERROR")
+            return False
+
+        # Encontrar nó <datasources>
+        datasources_node = None
+        for child in ds_subsystem:
+            if localname(child.tag) == 'datasources':
+                datasources_node = child
+                break
+        if datasources_node is None:
+            # criar um nó datasources dentro do subsystem
+            ns_uri = ds_subsystem.tag.split('}', 1)[0][1:] if ds_subsystem.tag.startswith('{') else ''
+            tag = f"{{{ns_uri}}}datasources" if ns_uri else "datasources"
+            datasources_node = ET.SubElement(ds_subsystem, tag)
+
+        # Garantir drivers
+        drivers_node = None
+        for child in datasources_node:
+            if localname(child.tag) == 'drivers':
+                drivers_node = child
+                break
+        if drivers_node is None:
+            ns_uri = datasources_node.tag.split('}', 1)[0][1:] if datasources_node.tag.startswith('{') else ''
+            tag = f"{{{ns_uri}}}drivers" if ns_uri else "drivers"
+            drivers_node = ET.SubElement(datasources_node, tag)
+
+        # Verificar driver postgresql
+        has_pg_driver = any(localname(d.tag) == 'driver' and d.get('name') == driver_name for d in drivers_node)
+        if not has_pg_driver:
+            ns_uri = drivers_node.tag.split('}', 1)[0][1:] if drivers_node.tag.startswith('{') else ''
+            tag = f"{{{ns_uri}}}driver" if ns_uri else "driver"
+            driver_el = ET.SubElement(drivers_node, tag, attrib={"name": driver_name, "module": module_name})
+            log("Driver 'postgresql' adicionado à seção <drivers>", "SUCCESS")
+
+        # Garantir datasource PostgresDS
+        has_ds = any(localname(n.tag) == 'datasource' and (n.get('pool-name') == pool_name or n.get('jndi-name') == jndi_name) for n in datasources_node)
+        if not has_ds:
+            ns_uri = datasources_node.tag.split('}', 1)[0][1:] if datasources_node.tag.startswith('{') else ''
+            ds_tag = f"{{{ns_uri}}}datasource" if ns_uri else "datasource"
+            cu_tag = f"{{{ns_uri}}}connection-url" if ns_uri else "connection-url"
+            sec_tag = f"{{{ns_uri}}}security" if ns_uri else "security"
+            user_tag = f"{{{ns_uri}}}user-name" if ns_uri else "user-name"
+            pass_tag = f"{{{ns_uri}}}password" if ns_uri else "password"
+            drv_tag = f"{{{ns_uri}}}driver" if ns_uri else "driver"
+
+            ds_el = ET.SubElement(datasources_node, ds_tag, attrib={
+                "jndi-name": jndi_name,
+                "pool-name": pool_name,
+                "enabled": "true",
+                "use-java-context": "true"
+            })
+            cu_el = ET.SubElement(ds_el, cu_tag)
+            cu_el.text = f"jdbc:postgresql://{db_host}:{db_port}/{db_name}"
+            drv_el = ET.SubElement(ds_el, drv_tag)
+            drv_el.text = driver_name
+            sec_el = ET.SubElement(ds_el, sec_tag)
+            user_el = ET.SubElement(sec_el, user_tag)
+            user_el.text = db_user
+            pass_el = ET.SubElement(sec_el, pass_tag)
+            pass_el.text = db_pass
+            log("Datasource 'PostgresDS' adicionado ao standalone.xml", "SUCCESS")
+        else:
+            log("Datasource 'PostgresDS' já existe no standalone.xml", "INFO")
+
+        # Salvar alterações
+        tree.write(standalone_xml, encoding='utf-8', xml_declaration=True)
+        log("standalone.xml atualizado com datasource PostgreSQL", "SUCCESS")
+        return True
+    except Exception as e:
+        log(f"Erro ao configurar datasource do WildFly: {e}", "ERROR")
+        return False
+
+def configure_tomcat_postgres_datasource():
+    """
+    Configura um datasource PostgreSQL no Tomcat editando o arquivo conf/context.xml
+    e garante a presença do driver em TOMCAT_DIR/lib.
+    Usa env vars: APP_DB_HOST, APP_DB_PORT, APP_DB_NAME, APP_DB_USER, APP_DB_PASSWORD.
+
+    Returns:
+        bool: True se configurado com sucesso, False caso contrário
+    """
+    try:
+        context_xml = os.path.join(TOMCAT_DIR, "conf", "context.xml")
+        if not os.path.exists(context_xml):
+            log(f"Arquivo context.xml não encontrado: {context_xml}", "ERROR")
+            return False
+
+        # Parâmetros: preferir docker-compose.yml com override por env
+        db_cfg = load_db_config_from_compose()
+        db_host = db_cfg["host"]
+        db_port = str(db_cfg["port"]) if isinstance(db_cfg["port"], int) else db_cfg["port"]
+        db_name = db_cfg["name"]
+        db_user = db_cfg["user"]
+        db_pass = db_cfg["password"]
+
+        # Log de confirmação
+        log(f"Usando credenciais do banco definidas: db={db_name}, user={db_user}", "INFO")
+
+        # Garantir driver no lib/
+        driver_version = "42.7.4"
+        jar_name = f"postgresql-{driver_version}.jar"
+        lib_dir = os.path.join(TOMCAT_DIR, "lib")
+        os.makedirs(lib_dir, exist_ok=True)
+        jar_path = os.path.join(lib_dir, jar_name)
+        if not os.path.exists(jar_path):
+            try:
+                url = f"https://repo1.maven.org/maven2/org/postgresql/postgresql/{driver_version}/{jar_name}"
+                log(f"Baixando driver PostgreSQL para Tomcat: {url}", "INFO")
+                r = requests.get(url, stream=True, timeout=30)
+                r.raise_for_status()
+                with open(jar_path, "wb") as f:
+                    for chunk in r.iter_content(8192):
+                        f.write(chunk)
+                log("Driver PostgreSQL copiado para TOMCAT/lib", "SUCCESS")
+            except Exception as e:
+                log(f"Falha ao baixar driver para Tomcat: {e}", "ERROR")
+                return False
+
+        # Backup do context.xml
+        backup_path = context_xml + ".bak"
+        if not os.path.exists(backup_path):
+            shutil.copy2(context_xml, backup_path)
+            log(f"Backup criado: {backup_path}", "INFO")
+
+        import xml.etree.ElementTree as ET
+        tree = ET.parse(context_xml)
+        root = tree.getroot()
+        # Garantir que root seja <Context>
+        if root.tag.lower() != 'context' and not root.tag.endswith('Context'):
+            log("O arquivo context.xml não possui nó raiz <Context>", "ERROR")
+            return False
+
+        # Verificar se já existe um Resource com nome 'jdbc/PostgresDS'
+        target_name = 'jdbc/PostgresDS'
+        existing = None
+        for child in root:
+            if child.tag.lower().endswith('resource') and child.get('name') == target_name:
+                existing = child
+                break
+
+        url = f"jdbc:postgresql://{db_host}:{db_port}/{db_name}"
+        attrs = {
+            'name': target_name,
+            'auth': 'Container',
+            'type': 'javax.sql.DataSource',
+            'factory': 'org.apache.commons.dbcp2.BasicDataSourceFactory',
+            'driverClassName': 'org.postgresql.Driver',
+            'url': url,
+            'username': db_user,
+            'password': db_pass,
+            'maxTotal': '50',
+            'maxIdle': '10',
+            'maxWaitMillis': '10000',
+            'initialSize': '5',
+            'validationQuery': 'SELECT 1',
+            'testOnBorrow': 'true'
+        }
+
+        if existing is None:
+            ET.SubElement(root, 'Resource', attrib=attrs)
+            log("Resource JDBC 'jdbc/PostgresDS' adicionado ao context.xml", "SUCCESS")
+        else:
+            # Atualizar atributos existentes
+            for k, v in attrs.items():
+                existing.set(k, v)
+            log("Resource JDBC 'jdbc/PostgresDS' atualizado no context.xml", "SUCCESS")
+
+        tree.write(context_xml, encoding='utf-8', xml_declaration=True)
+        log("context.xml atualizado com datasource PostgreSQL", "SUCCESS")
+        return True
+    except Exception as e:
+        log(f"Erro ao configurar datasource do Tomcat: {e}", "ERROR")
+        return False
 def check_wildfly_environment():
     """
     Verifica o ambiente do WildFly e fornece informações de diagnóstico.
@@ -830,6 +1174,9 @@ def check_wildfly_environment():
         return False
     
     print(f"{Colors.GREEN}✓ Arquivo de configuração standalone.xml encontrado{Colors.END}")
+    # Exibir a porta configurada do WildFly em verde e registrar no log
+    print(f"{Colors.GREEN}✓ Porta configurada do WildFly: {WILDFLY_PORT}{Colors.END}")
+    log(f"Porta do WildFly {WILDFLY_PORT} Ok", "SUCCESS")
     
     # Verificar se os scripts de inicialização existem
     if platform.system() == "Windows":
@@ -1007,10 +1354,24 @@ def check_tomcat_environment():
             server_xml_content = f.read()
             if f'port="{TOMCAT_PORT}"' in server_xml_content:
                 print(f"{Colors.GREEN}✓ Porta {TOMCAT_PORT} configurada no server.xml{Colors.END}")
+                # Confirmação no log em verde da porta Ok
+                log(f"Porta do Tomcat {TOMCAT_PORT} Ok", "SUCCESS")
             else:
                 print(f"{Colors.RED}Alerta: Porta {TOMCAT_PORT} não encontrada no server.xml{Colors.END}")
-                print(f"{Colors.YELLOW}Sugestão: A porta customizada pode não estar configurada corretamente.{Colors.END}")
-                # Não retornar False aqui, apenas alertar
+                print(f"{Colors.YELLOW}Atualizando automaticamente o server.xml para usar a porta {TOMCAT_PORT}...{Colors.END}")
+                if configure_tomcat_port(TOMCAT_DIR, TOMCAT_PORT):
+                    print(f"{Colors.GREEN}✓ Porta atualizada para {TOMCAT_PORT} em server.xml.{Colors.END}")
+                    # Confirmação no log em verde após correção automática
+                    log(f"Porta do Tomcat {TOMCAT_PORT} Ok", "SUCCESS")
+                    # Oferecer reinício automático do Tomcat Standalone
+                    ans = input(f"{Colors.CYAN}Deseja reiniciar o Tomcat Standalone agora para aplicar a mudança? (S/N){Colors.END} ").strip().upper()
+                    if ans == 'S':
+                        if restart_tomcat_server():
+                            print(f"{Colors.GREEN}✓ Tomcat reiniciado. Verifique em http://localhost:{TOMCAT_PORT}/{Colors.END}")
+                        else:
+                            print(f"{Colors.RED}Falha ao reiniciar o Tomcat automaticamente. Reinicie manualmente.{Colors.END}")
+                else:
+                    print(f"{Colors.RED}Falha ao atualizar a porta no server.xml.{Colors.END}")
     except Exception as e:
         print(f"{Colors.RED}Erro ao ler server.xml: {str(e)}{Colors.END}")
     
@@ -1577,30 +1938,40 @@ def start_tomcat_server():
             shutil.copy2(war_file, war_dest)
             log(f"Arquivo WAR copiado para Tomcat: {war_dest}", "SUCCESS")
             
-            # Iniciar o Tomcat
-            log("Iniciando o Tomcat Standalone...", "INFO")
-            if platform.system() == "Windows":
-                cmd = [os.path.join(TOMCAT_DIR, "bin", "startup.bat")]
-                process = subprocess.Popen(cmd, shell=True, cwd=os.path.join(TOMCAT_DIR, "bin"))
-            else:
-                cmd = [os.path.join(TOMCAT_DIR, "bin", "startup.sh")]
-                process = subprocess.Popen(cmd, shell=True, cwd=os.path.join(TOMCAT_DIR, "bin"))
-            
-            # Aguardar inicialização
-            log("Aguardando inicialização do Tomcat Standalone...", "INFO")
-            time.sleep(15)
-            
-            # Em sistemas Windows, não podemos obter diretamente o PID do processo Java
-            # então vamos assumir que se o script não falhou, o Tomcat está rodando
-            log("Tomcat Standalone inicializado com sucesso.", "SUCCESS")
-            # Exibir link da aplicação
-            print(f"\n{Colors.GREEN}Aplicação disponível em: http://localhost:{TOMCAT_PORT}/meu-projeto-java/{Colors.END}")
-            log(f"Aplicação disponível em: http://localhost:{TOMCAT_PORT}/meu-projeto-java/", "SUCCESS")
-            return {
-                "success": True,
-                "process": process,
-                "type": "tomcat-standalone"
-            }
+            # Iniciar Tomcat em foreground (console aqui)
+            log("Iniciando o Tomcat em foreground (console neste terminal)...", "INFO")
+            bin_dir = os.path.join(TOMCAT_DIR, "bin")
+            try:
+                if platform.system() == "Windows":
+                    cmd = f'"{os.path.join(bin_dir, "catalina.bat")}" run'
+                    process = subprocess.Popen(cmd, shell=True, cwd=bin_dir)
+                else:
+                    cmd = [os.path.join(bin_dir, "catalina.sh"), "run"]
+                    process = subprocess.Popen(cmd, cwd=bin_dir)
+
+                print(f"{Colors.CYAN}Tomcat em execução no foreground. Pressione Ctrl+C para parar.{Colors.END}")
+                print(f"{Colors.GREEN}Aplicação: http://localhost:{TOMCAT_PORT}/meu-projeto-java/{Colors.END}")
+                process.wait()
+                log("Tomcat finalizado.", "INFO")
+                return {
+                    "success": True,
+                    "process": process,
+                    "type": "tomcat-standalone-foreground"
+                }
+            except KeyboardInterrupt:
+                log("Interrompido pelo usuário. Enviando shutdown ao Tomcat...", "INFO")
+                try:
+                    if platform.system() == "Windows":
+                        subprocess.run([os.path.join(bin_dir, "shutdown.bat")], shell=True, cwd=bin_dir)
+                    else:
+                        subprocess.run([os.path.join(bin_dir, "shutdown.sh")], cwd=bin_dir)
+                except Exception:
+                    pass
+                return {
+                    "success": True,
+                    "process": None,
+                    "type": "tomcat-standalone-foreground"
+                }
         
         # Opção 3: Usar Tomcat via perfil Maven
         elif tomcat_option == "3":
@@ -2236,6 +2607,46 @@ def stop_tomcat_server():
         log(f"Erro ao parar o servidor Tomcat: {str(e)}", "ERROR")
         return False
 
+def restart_tomcat_server():
+    """
+    Reinicia o Tomcat Standalone usando os scripts do diretório `TOMCAT_DIR`.
+    Retorna True se reiniciado com sucesso.
+    """
+    try:
+        stopped = False
+        # Tentar parar com script
+        if platform.system() == "Windows":
+            shutdown = os.path.join(TOMCAT_DIR, "bin", "shutdown.bat")
+            if os.path.exists(shutdown):
+                subprocess.run([shutdown], shell=True, cwd=os.path.join(TOMCAT_DIR, "bin"))
+                stopped = True
+        else:
+            shutdown = os.path.join(TOMCAT_DIR, "bin", "shutdown.sh")
+            if os.path.exists(shutdown):
+                subprocess.run([shutdown], cwd=os.path.join(TOMCAT_DIR, "bin"))
+                stopped = True
+        time.sleep(3)
+
+        # Iniciar novamente
+        if platform.system() == "Windows":
+            startup = os.path.join(TOMCAT_DIR, "bin", "startup.bat")
+            if not os.path.exists(startup):
+                log("startup.bat não encontrado no Tomcat.", "ERROR")
+                return False
+            subprocess.run([startup], shell=True, cwd=os.path.join(TOMCAT_DIR, "bin"))
+        else:
+            startup = os.path.join(TOMCAT_DIR, "bin", "startup.sh")
+            if not os.path.exists(startup):
+                log("startup.sh não encontrado no Tomcat.", "ERROR")
+                return False
+            subprocess.run([startup], cwd=os.path.join(TOMCAT_DIR, "bin"))
+
+        log("Tomcat reiniciado.", "SUCCESS")
+        return True
+    except Exception as e:
+        log(f"Falha ao reiniciar Tomcat: {e}", "ERROR")
+        return False
+
 def stop_wildfly_server():
     """
     Para o servidor WildFly se estiver em execução.
@@ -2323,6 +2734,9 @@ def main():
         print(f"{Colors.BLUE}6. Undeploy {Colors.CYAN}(Limpar deployments, Tomcat e WildFly){Colors.END}")
         print(f"{Colors.BLUE}7. Diagnóstico do Tomcat {Colors.CYAN}(Verificar configuração e ambiente){Colors.END}")
         print(f"{Colors.BLUE}8. Diagnóstico do WildFly {Colors.CYAN}(Verificar configuração e ambiente){Colors.END}")
+        print(f"{Colors.BLUE}9. Aplicar porta 9090 no Tomcat e reiniciar{Colors.END}")
+        print(f"{Colors.BLUE}10. Configurar datasource PostgreSQL no WildFly{Colors.END}")
+        print(f"{Colors.BLUE}11. Configurar datasource PostgreSQL no Tomcat{Colors.END}")
         print(f"{Colors.BLUE}0. Sair{Colors.END}")
         
         option = input(f"\n{Colors.CYAN}Escolha uma opção: {Colors.END}").strip()
@@ -2398,6 +2812,13 @@ def main():
                 # Configurar a porta do Tomcat antes de iniciar
                 log(f"Configurando Tomcat para usar a porta {TOMCAT_PORT}...", "INFO")
                 configure_tomcat_port(TOMCAT_DIR, TOMCAT_PORT)
+
+                # Garantir datasource PostgreSQL no Tomcat
+                log("Verificando/Configurando datasource PostgreSQL no Tomcat...", "INFO")
+                if configure_tomcat_postgres_datasource():
+                    log("Datasource PostgreSQL pronto no Tomcat.", "SUCCESS")
+                else:
+                    log("Não foi possível garantir o datasource PostgreSQL no Tomcat.", "WARNING")
                 
                 tomcat_webapps = os.path.join(TOMCAT_DIR, "webapps")
                 if not os.path.exists(tomcat_webapps):
@@ -2440,31 +2861,67 @@ def main():
                         else:
                             os.remove(item_path)
                             log(f"Arquivo {item} removido do Tomcat", "INFO")
+                            # Iniciar novamente em foreground (console neste terminal)
+                            bin_dir = os.path.join(TOMCAT_DIR, "bin")
+                            try:
+                                if platform.system() == "Windows":
+                                    catalina = os.path.join(bin_dir, "catalina.bat")
+                                    if not os.path.exists(catalina):
+                                        log("catalina.bat não encontrado no Tomcat.", "ERROR")
+                                        return False
+                                    cmd = f'"{catalina}" run'
+                                    process = subprocess.Popen(cmd, shell=True, cwd=bin_dir)
+                                else:
+                                    catalina = os.path.join(bin_dir, "catalina.sh")
+                                    if not os.path.exists(catalina):
+                                        log("catalina.sh não encontrado no Tomcat.", "ERROR")
+                                        return False
+                                    process = subprocess.Popen([catalina, "run"], cwd=bin_dir)
+                                print(f"{Colors.CYAN}Tomcat em execução no foreground. Pressione Ctrl+C para parar.{Colors.END}")
+                                print(f"{Colors.GREEN}Aplicação: http://localhost:{TOMCAT_PORT}/meu-projeto-java/{Colors.END}")
+                                process.wait()
+                                log("Tomcat finalizado.", "INFO")
+                                return True
+                            except KeyboardInterrupt:
+                                log("Interrompido pelo usuário. Enviando shutdown ao Tomcat...", "INFO")
+                                try:
+                                    if platform.system() == "Windows":
+                                        subprocess.run([os.path.join(bin_dir, "shutdown.bat")], shell=True, cwd=bin_dir)
+                                    else:
+                                        subprocess.run([os.path.join(bin_dir, "shutdown.sh")], cwd=bin_dir)
+                                except Exception:
+                                    pass
+                            return True
                 
                 # Copiar o WAR para o Tomcat
                 war_dest = os.path.join(tomcat_webapps, "meu-projeto-java.war")
                 shutil.copy2(war_file, war_dest)
                 log(f"Arquivo WAR copiado para Tomcat: {war_dest}", "SUCCESS")
                 
-                # Iniciar o Tomcat para aplicar o deploy
-                log("Iniciando o servidor Tomcat para aplicar o deploy...", "INFO")
-                print(f"\n{Colors.YELLOW}Iniciando o servidor Tomcat, aguarde...{Colors.END}")
-                
-                log("Inicializando o Tomcat. Isso pode levar alguns instantes...", "INFO")
-                log(f"Configurado para usar a porta {TOMCAT_PORT} (verificada após inicialização)", "INFO")
-                
-                # Configurar variáveis de ambiente para o Tomcat
-                tomcat_env = setup_tomcat_environment(TOMCAT_DIR)
-                tomcat_env["CATALINA_OPTS"] = f"-Dport.http.nonssl={TOMCAT_PORT}"
-                
-                if platform.system() == "Windows":
+                # Iniciar o Tomcat no foreground (console neste terminal)
+                log("Iniciando o Tomcat em foreground (console neste terminal)...", "INFO")
+                log(f"Configurado para usar a porta {TOMCAT_PORT}.", "INFO")
+                bin_dir = os.path.join(TOMCAT_DIR, "bin")
+                try:
+                    if platform.system() == "Windows":
+                        cmd = f'"{os.path.join(bin_dir, "catalina.bat")}" run'
+                        tomcat_process = subprocess.Popen(cmd, shell=True, cwd=bin_dir)
+                    else:
+                        cmd = [os.path.join(bin_dir, "catalina.sh"), "run"]
+                        tomcat_process = subprocess.Popen(cmd, cwd=bin_dir)
+                    print(f"{Colors.CYAN}Tomcat em execução no foreground. Pressione Ctrl+C para parar.{Colors.END}")
+                    print(f"{Colors.GREEN}Aplicação: http://localhost:{TOMCAT_PORT}/meu-projeto-java/{Colors.END}")
+                    tomcat_process.wait()
+                    log("Tomcat finalizado.", "INFO")
+                except KeyboardInterrupt:
+                    log("Interrompido pelo usuário. Enviando shutdown ao Tomcat...", "INFO")
                     try:
-                        tomcat_process = subprocess.Popen([os.path.join(TOMCAT_DIR, "bin", "startup.bat")], shell=True, env=tomcat_env)
-                        log("Comando de inicialização do Tomcat executado com sucesso", "SUCCESS")
-                        print(f"{Colors.YELLOW}Aguardando o servidor inicializar (20 segundos)...{Colors.END}")
-                        time.sleep(20)  # Aumentando o tempo de espera para o Tomcat iniciar completamente
-                    except Exception as e:
-                        log(f"Erro ao iniciar o Tomcat: {str(e)}", "ERROR")
+                        if platform.system() == "Windows":
+                            subprocess.run([os.path.join(bin_dir, "shutdown.bat")], shell=True, cwd=bin_dir)
+                        else:
+                            subprocess.run([os.path.join(bin_dir, "shutdown.sh")], cwd=bin_dir)
+                    except Exception:
+                        pass
                 else:
                     try:
                         tomcat_process = subprocess.Popen([os.path.join(TOMCAT_DIR, "bin", "startup.sh")], shell=True, env=tomcat_env)
@@ -2750,6 +3207,12 @@ def main():
             
             # Deploy no WildFly
             if os.path.exists(WILDFLY_DIR):
+                # Garantir datasource PostgreSQL configurado
+                log("Verificando/Configurando datasource PostgreSQL no WildFly...", "INFO")
+                if configure_wildfly_postgres_datasource():
+                    log("Datasource PostgreSQL pronto no WildFly.", "SUCCESS")
+                else:
+                    log("Não foi possível garantir o datasource PostgreSQL. O app pode falhar ao conectar.", "WARNING")
                 deployments_dir = os.path.join(WILDFLY_DIR, "standalone", "deployments")
                 if not os.path.exists(deployments_dir):
                     os.makedirs(deployments_dir)
@@ -2976,6 +3439,64 @@ def main():
         elif option == "8":
             log("Iniciando diagnóstico do WildFly...", "INFO")
             check_wildfly_environment()
+            input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
+        
+        elif option == "9":
+            log(f"Aplicando porta {TOMCAT_PORT} no Tomcat e reiniciando...", "INFO")
+            # Garantir que diretório existe
+            if not os.path.exists(TOMCAT_DIR):
+                log(f"Tomcat não encontrado em: {TOMCAT_DIR}", "ERROR")
+                input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
+                continue
+            # Atualizar server.xml
+            if configure_tomcat_port(TOMCAT_DIR, TOMCAT_PORT):
+                log(f"Porta do Tomcat ajustada para {TOMCAT_PORT}.", "SUCCESS")
+                # Reiniciar
+                if restart_tomcat_server():
+                    log(f"Tomcat reiniciado. Acesse http://localhost:{TOMCAT_PORT}/", "SUCCESS")
+                else:
+                    log("Falha ao reiniciar Tomcat automaticamente. Reinicie manualmente.", "ERROR")
+            else:
+                log("Falha ao atualizar server.xml.", "ERROR")
+            input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
+
+        elif option == "10":
+            log("Configurando datasource PostgreSQL no WildFly...", "INFO")
+            if not os.path.exists(WILDFLY_DIR):
+                log(f"WildFly não encontrado em: {WILDFLY_DIR}", "ERROR")
+                input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
+                continue
+            if configure_wildfly_postgres_datasource():
+                log("Datasource PostgreSQL configurado com sucesso no WildFly.", "SUCCESS")
+                # Reinício automático para aplicar alterações
+                log("Reiniciando WildFly para aplicar alterações do datasource...", "INFO")
+                stop_wildfly_server()
+                time.sleep(2)
+                if platform.system() == "Windows":
+                    subprocess.Popen([os.path.join(WILDFLY_DIR, "bin", "standalone.bat")], shell=True)
+                else:
+                    subprocess.Popen([os.path.join(WILDFLY_DIR, "bin", "standalone.sh")], shell=True)
+                log("WildFly reiniciado (inicialização em background).", "INFO")
+            else:
+                log("Falha ao configurar o datasource do WildFly.", "ERROR")
+            input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
+
+        elif option == "11":
+            log("Configurando datasource PostgreSQL no Tomcat...", "INFO")
+            if not os.path.exists(TOMCAT_DIR):
+                log(f"Tomcat não encontrado em: {TOMCAT_DIR}", "ERROR")
+                input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
+                continue
+            if configure_tomcat_postgres_datasource():
+                log("Datasource PostgreSQL configurado com sucesso no Tomcat.", "SUCCESS")
+                # Reinício obrigatório: o Tomcat não aplica context.xml a quente
+                log("Reiniciando Tomcat para aplicar alterações do datasource...", "INFO")
+                if restart_tomcat_server():
+                    log("Tomcat reiniciado para aplicar datasource.", "SUCCESS")
+                else:
+                    log("Falha ao reiniciar o Tomcat.", "ERROR")
+            else:
+                log("Falha ao configurar o datasource do Tomcat.", "ERROR")
             input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
             
         elif option == "0":

@@ -192,6 +192,41 @@ function Install-Requirements {
     } else {
         Write-Ok "Todos os pacotes críticos para validação de hash estão instalados."
     }
+
+    # Garantir driver PostgreSQL (psycopg2) instalado
+    Write-Info "Verificando driver PostgreSQL (psycopg2)..."
+    $hasPsy = '0'
+    try {
+        $checkCmd = "import importlib.util; print('1' if importlib.util.find_spec('psycopg2') else '0')"
+        $hasPsy = & $VenvPy -c $checkCmd 2>$null
+    } catch {
+        $hasPsy = '0'
+    }
+    if($hasPsy -ne '1'){
+        if($IsWindows){
+            Write-Info "Instalando psycopg2-binary (Windows)..."
+            & $VenvPy -m pip install psycopg2-binary
+            if($LASTEXITCODE -ne 0){
+                Write-Warn "Falha ao instalar psycopg2-binary. Tentando psycopg2..."
+                & $VenvPy -m pip install psycopg2
+            }
+        } else {
+            Write-Info "Instalando psycopg2 (Linux/Mac)..."
+            & $VenvPy -m pip install psycopg2
+            if($LASTEXITCODE -ne 0){
+                Write-Warn "Falha ao instalar psycopg2. Tentando psycopg2-binary..."
+                & $VenvPy -m pip install psycopg2-binary
+            }
+        }
+        if($LASTEXITCODE -ne 0){
+            Write-Err "Falha ao instalar driver PostgreSQL (psycopg2)."
+            $global:HAS_ERROR = $true
+        } else {
+            Write-Ok "Driver PostgreSQL instalado."
+        }
+    } else {
+        Write-Ok "Driver PostgreSQL já presente."
+    }
 }
 
 function Test-Requirements {
@@ -256,6 +291,20 @@ function Test-Requirements {
     
     $global:STATUS.MissingPackages = $missing
     if($missing.Count -gt 0){ Write-Warn ("Dependencias ausentes: {0}" -f ($missing -join ', ')) } else { Write-Ok 'Dependencias requeridas presentes.' }
+
+    # Validar psycopg2 via import (pode ter sido instalado como psycopg2-binary)
+    try {
+        $checkPsy = & $VenvPy -c "import importlib.util; print('1' if importlib.util.find_spec('psycopg2') else '0')" 2>$null
+        if($checkPsy -ne '1'){
+            Write-Warn "Driver PostgreSQL 'psycopg2' não encontrado (instale 'psycopg2' ou 'psycopg2-binary')."
+            if(-not $global:STATUS.MissingPackages.Contains('psycopg2')){ $global:STATUS.MissingPackages += 'psycopg2' }
+        } else {
+            Write-Ok "psycopg2 disponível na venv."
+        }
+    } catch {
+        Write-Warn "Falha ao verificar psycopg2."
+        if(-not $global:STATUS.MissingPackages.Contains('psycopg2')){ $global:STATUS.MissingPackages += 'psycopg2' }
+    }
 }
 
 function Export-StatusJson {

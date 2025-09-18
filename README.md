@@ -7,10 +7,19 @@ Aplicação Java (Jakarta EE) com autenticação, deploy via Tomcat ou WildFly, 
 ### Visão Geral
 - Código da aplicação: `meu-projeto-java`
 - Automação: `main.py` (menu + build/deploy/diagnóstico)
+- Provisionamento Python: `setup-python.ps1` (venv + requirements)
+- Validação ambiente dev: `setup.dev.py` (checagens e auto-fix opcionais)
 - Banco de dados: `docker-compose.yml` + `docker/postgres/init/01-init.sql`
 - Servidores suportados:
   - Tomcat 10.1.35 (HTTP 9090 quando standalone via `main.py`)
   - WildFly 37.0.1.Final (HTTP 8080, Management 9990)
+
+—
+
+### Sequência de Scripts (Recomendado)
+1. `setup-python.ps1`: prepara o ambiente Python local (cria `venv` e instala `requirements.txt`).
+2. `setup.dev.py`: valida configuração do ambiente de desenvolvimento (Java, Maven, Docker, PostgreSQL, bcrypt) e pode tentar corrigir.
+3. `main.py`: menu para build, deploy e gestão dos servidores (Tomcat/WildFly).
 
 —
 
@@ -30,28 +39,30 @@ docker --version
 
 —
 
-### Setup Rápido
-1) Validar e preparar ambiente (venv, Maven, Docker, Postgres):
+### Setup Rápido (Windows PowerShell)
+1) Preparar o ambiente Python (cria venv e instala requirements):
 ```powershell
-python .\setup.dev.py                # Checagens + cria venv e instala requirements
-python .\setup.dev.py --only-check   # Apenas checagens (sem modificar nada)
-python .\setup.dev.py --auto-fix     # Tenta corrigir problemas (Docker, Maven, Postgres, bcrypt)
+./setup-python.ps1
 ```
-2) Ativar a venv (opcional, para rodar `main.py` no ambiente isolado):
+2) Ativar a venv (para rodar `setup.dev.py` e `main.py` no ambiente isolado):
 ```powershell
 . .\.venv\Scripts\Activate.ps1
 ```
-3) Subir o Postgres em Docker (se ainda não estiver rodando):
+3) Validar a configuração do ambiente local (checagens e correções opcionais):
+```powershell
+python .\setup.dev.py --only-check   # Apenas checagens
+python .\setup.dev.py --auto-fix     # (Opcional) tenta corrigir problemas
+```
+4) Subir o Postgres em Docker (se ainda não estiver rodando):
 ```powershell
 docker compose up -d postgres
 docker ps --filter "name=postgres"
 ```
-4) Fazer uma checagem final do projeto:
+5) Checagem final do projeto e/ou abrir o menu:
 ```powershell
 python .\main.py --only-check
+python .\main.py
 ```
-
-Alternativa curta apenas para Python: `./setup-python.ps1` (cria venv e instala requirements).
 
 —
 
@@ -126,6 +137,41 @@ WildFly:
 Portas podem ser ajustadas no `main.py` (`TOMCAT_PORT`, `WILDFLY_PORT`) ou nas configurações dos servidores.
 
 —
+
+### Datasource (PostgreSQL)
+- Origem das credenciais: lidas do `docker-compose.yml` (serviço `postgres`) e aplicadas no Tomcat/WildFly.
+- Overrides por ambiente: se definir, as variáveis `APP_DB_HOST`, `APP_DB_PORT`, `APP_DB_NAME`, `APP_DB_USER`, `APP_DB_PASSWORD` têm precedência.
+- Valores do compose (padrão do projeto):
+  - DB: `meu_app_db`
+  - Usuário: `meu_app_user`
+  - Senha: `meu_app_password`
+  - Host/Porta: `localhost:5432` (a partir de `ports: "5432:5432"`)
+
+No menu do `main.py`:
+- Opção 10: configura datasource PostgreSQL no WildFly (edita `standalone.xml` + adiciona driver em `modules/org/postgresql`).
+- Opção 11: configura datasource PostgreSQL no Tomcat (edita `conf/context.xml` + copia driver para `lib/`).
+- Deploy (opções 2 e 4) já aplicam essa configuração automaticamente antes de publicar o WAR.
+
+Importante:
+- Alterações em `conf/context.xml` não são aplicadas a quente. O `main.py` reinicia o Tomcat automaticamente após configurar o datasource (opção 11) para garantir que as mudanças entrem em vigor.
+ - A opção 10 reinicia o WildFly automaticamente após aplicar o datasource para garantir que o servidor carregue a configuração.
+
+Exemplos de overrides temporários (PowerShell):
+```powershell
+$env:APP_DB_HOST = '127.0.0.1'
+$env:APP_DB_PORT = '5433'
+$env:APP_DB_NAME = 'meu_app_db'
+$env:APP_DB_USER = 'meu_app_user'
+$env:APP_DB_PASSWORD = 'meu_app_password'
+python .\main.py
+```
+
+Validação de conexão no próprio script:
+- `main.py` realiza um teste de conexão (se `psycopg2-binary` estiver instalado) usando os mesmos parâmetros.
+
+Observações:
+- É feito backup automático de `standalone.xml` e `context.xml` (`*.bak`) antes de alterações.
+- O driver JDBC do PostgreSQL (42.7.4) é baixado automaticamente quando necessário.
 
 ### Variáveis/Argumentos Úteis
 - `APP_TOMCAT_DIR`: caminho do Tomcat
