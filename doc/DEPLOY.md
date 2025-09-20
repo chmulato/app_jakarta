@@ -36,12 +36,13 @@ wsl --install
 ```
 Após instalar WSL ou iniciar Docker Desktop, revalide com o script de setup (abaixo).
 
-### Script de Setup (Recomendado)
+### Scripts de setup (recomendado)
 ```powershell
-./setup-dev.ps1            # Cria venv e valida tudo
-./setup-dev.ps1 -OnlyCheck # Somente checagens
+./setup-python.ps1           # Cria venv e instala requirements
+python .\setup.dev.py --only-check   # Checagens
+python .\setup.dev.py --auto-fix     # (opcional) corrige o que for possível
 ```
-Principais verificações: Java, Maven, Docker CLI + daemon, container postgres, WSL, perfis Maven, virtualenv Python.
+Principais verificações: Java, Maven, Docker CLI + daemon, container postgres, perfis Maven, virtualenv Python, bcrypt.
 
 ## Validação de Ambiente / Fluxo com Script Python
 Antes de qualquer deploy:
@@ -55,6 +56,13 @@ python .\main.py --only-check   # Apenas valida ambiente
 python .\main.py --tomcat-dir C:\srv\tomcat10 --wildfly-dir D:\srv\wf37
 ```
 Logs de execução Maven/Deploy: `log/maven_deploy.log`.
+
+### Execução fim a fim (Opção 12)
+Fluxo completo e não interativo: para servidores ativos, prepara DB e seed (BCrypt $2a$), builda, faz deploy (Tomcat cold deploy / WildFly hot deploy), valida JNDI (com nomes distintos por servidor) e testa login.
+
+```powershell
+python .\main.py 12
+```
 
 ## Build Manual
 ```powershell
@@ -75,6 +83,10 @@ target/*.war -> copiar para webapps/ (se usar standalone)
 ```
 Via script: Menu → Opção 2 (deploy) / Opção 3 (iniciar sem deploy).
 
+Notas:
+- JNDI no Tomcat: `java:comp/env/jdbc/PostgresDS` (configurado em `conf/context.xml` usando factory DBCP do Tomcat).
+- Contexto: se o WAR for publicado como `ROOT.war`, o acesso será `http://localhost:9090/`.
+
 ## Deploy WildFly
 ```powershell
 # Build + deploy
@@ -83,6 +95,10 @@ mvn clean package -Pwildfly wildfly:deploy -DskipTests
 mvn wildfly:undeploy -Pwildfly
 ```
 Via script: Menu → Opção 4 (deploy) / Opção 5 (iniciar sem deploy).
+
+Notas:
+- JNDI no WildFly: `java:/jdbc/PostgresDS` (configurado em `standalone.xml`).
+- Contexto: `ROOT.war` resulta em contexto `/` (http://localhost:8080/).
 
 ## Overrides de Diretório
 Precedência: argumento > variável ambiente > padrão.

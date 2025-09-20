@@ -1,23 +1,23 @@
 # Resultados dos Testes de Deploy (Atualizado)
 
-## 📅 Histórico
+## Histórico
 | Data | Contexto |
 |------|----------|
 | 16/09/2025 | Testes pós-refatoração inicial (scripts PowerShell) |
 | 17/09/2025 | Ajuste portas (Tomcat→9090 / WildFly→8080), adoção de `main.py` |
 
-## 🎯 Objetivo
+## Objetivo
 Testar o deploy da aplicação Java nos servidores Tomcat e WildFly após refatoração da arquitetura.
 
-## 🗃️ Infraestrutura
+## Infraestrutura
 - **PostgreSQL**: ✅ Rodando no Docker (porta 5432) - Status: HEALTHY
 - **Sistema**: Java 11, Maven, Windows + PowerShell
 
 ---
 
-## 📊 Resultados por Servidor
+## Resultados por servidor
 
-### 🐺 WildFly 37.0.1.Final (Porta HTTP 8080 / Mgmt 9990)
+### WildFly 37.0.1.Final (porta HTTP 8080 / mgmt 9990)
 
 | Aspecto | Status | Detalhes |
 |---------|--------|----------|
@@ -25,7 +25,7 @@ Testar o deploy da aplicação Java nos servidores Tomcat e WildFly após refato
 | **Deploy** | ✅ **SUCESSO** | `wildfly:deploy` executado |
 | **Servidor** | ✅ **RODANDO** | Porta 8080 (app) + 9990 (management) |
 | **Banco de Dados** | ✅ **CONECTADO** | PostgreSQL integração OK |
-| **Acesso Web** | ✅ **ACESSÍVEL** | http://localhost:9090/meu-projeto-java |
+| **Acesso Web** | ✅ **ACESSÍVEL** | http://localhost:8080/ |
 | **Configuração** | ✅ **FLEXÍVEL** | Sem hardcode, via properties |
 
 **Comando executado:**
@@ -39,7 +39,7 @@ python .\main.py (opção 4)
 
 ---
 
-### 🍅 Tomcat (Porta 9090)
+### Tomcat (porta 9090)
 
 | Aspecto | Status | Detalhes |
 |---------|--------|----------|
@@ -70,15 +70,15 @@ python .\main.py (opção 2)
 
 ---
 
-## 🏗️ Arquitetura Implementada
+## Arquitetura implementada
 
-### ✅ Princípios Alcançados
+### Princípios alcançados
 - **Sem hardcode**: Portas e caminhos via properties
 - **Separação limpa**: Interfaces e classes abstratas
 - **Flexibilidade**: Múltiplos perfis Maven
 - **Configuração dinâmica**: System properties + environment variables
 
-### 📁 Estrutura de Código
+### Estrutura de código
 ```
 src/main/java/
 ├── com.exemplo.server/
@@ -92,7 +92,7 @@ src/main/java/
 
 ---
 
-## 🎯 Status Atual
+## Status atual
 | Servidor | Status | Observação |
 |----------|--------|------------|
 | WildFly  | ✅ Pronto | Deploy consistente via plugin ou script |
@@ -100,7 +100,7 @@ src/main/java/
 
 ---
 
-## ✅ Correções Importantes (Históricas)
+## Correções importantes (históricas)
 
 Adicionamos a dependência que faltava ao perfil do Tomcat:
 ```xml
@@ -120,7 +120,7 @@ Iniciando teste do Hibernate Commons Annotations...
 Teste concluído com sucesso! A dependência hibernate-commons-annotations está funcionando.
 ```
 
-## 🔍 Execução de Testes (Atual)
+## Execução de testes (atual)
 ```powershell
 mvn clean test verify
 # Relatório cobertura: target/site/jacoco/index.html
@@ -134,7 +134,7 @@ mvn test
 
 ---
 
-## 📝 Observações Técnicas
+## Observações técnicas
 
 - **PostgreSQL**: Container Docker estável e confiável
 - **Maven Profiles**: Funcionando perfeitamente para builds condicionais
