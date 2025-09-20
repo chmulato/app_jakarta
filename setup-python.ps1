@@ -148,7 +148,10 @@ function Install-Requirements {
     # Pacotes críticos que devem estar presentes para o tooling do projeto
     # - bcrypt: validações de hash
     # - requests: HTTP client usado pelo main.py/setup
-    $criticalPackages = @('bcrypt','requests')
+    # - colorama: saída colorida do console
+    # - psutil: métricas e diagnóstico do sistema
+    # - PyYAML: leitura de arquivos YAML (módulo de importação 'yaml')
+    $criticalPackages = @('bcrypt','requests','colorama','psutil','yaml')
     
     if(Test-Path $ReqPath){
         Write-Info "Instalando dependencias ($([System.IO.Path]::GetFileName($ReqPath)))..."
@@ -160,7 +163,9 @@ function Install-Requirements {
         Write-Warn 'Arquivo requirements.txt nao encontrado, pulando instalacao.'
     }
     
-    # Verificar e instalar pacotes críticos para validação de hash criptográfico
+    # Nota: 'builtins' é módulo embutido (stdlib) do Python e não requer instalação via pip.
+
+    # Verificar e instalar pacotes críticos do projeto
     $missingCritical = @()
     foreach($pkg in $criticalPackages) {
         Write-Info "Verificando pacote crítico: $pkg..."
@@ -180,19 +185,24 @@ function Install-Requirements {
     }
     
     if($missingCritical.Count -gt 0) {
-        Write-Info "Instalando pacotes críticos para validação de hash criptográfico: $($missingCritical -join ', ')..."
+        Write-Info "Instalando pacotes críticos do projeto: $($missingCritical -join ', ')..."
+        # Mapeamento de nomes de módulo (import) -> nomes de pacote do pip
+        $moduleToPip = @{
+            'yaml' = 'pyyaml'
+        }
         foreach($pkg in $missingCritical) {
-            Write-Info "Instalando $pkg..."
-            & $VenvPy -m pip install $pkg
+            $pipName = if($moduleToPip.ContainsKey($pkg)) { $moduleToPip[$pkg] } else { $pkg }
+            Write-Info "Instalando $pipName (módulo '$pkg')..."
+            & $VenvPy -m pip install $pipName
             if($LASTEXITCODE -ne 0) {
-                Write-Err "Falha ao instalar $pkg. O setup.dev.py pode não validar corretamente os hashes criptográficos."
+                Write-Err "Falha ao instalar $pipName. Algumas funcionalidades do setup/dev podem falhar."
                 $global:HAS_ERROR = $true
             } else {
-                Write-Ok "Pacote $pkg instalado com sucesso."
+                Write-Ok "Pacote $pipName instalado com sucesso."
             }
         }
     } else {
-        Write-Ok "Todos os pacotes críticos para validação de hash estão instalados."
+        Write-Ok "Todos os pacotes críticos do projeto estão instalados."
     }
 
     # Garantir driver PostgreSQL (psycopg2) instalado
@@ -267,7 +277,8 @@ function Test-Requirements {
     }
     
     # Pacotes críticos necessários para o tooling do projeto
-    $criticalPackages = @('bcrypt','requests')
+    # (usar nomes de módulos importáveis)
+    $criticalPackages = @('bcrypt','requests','colorama','psutil','yaml')
     
     $installed = @{}
     foreach($line in ($freeze -split "`n")){
@@ -284,10 +295,16 @@ function Test-Requirements {
     }
     
     # Verifica pacotes críticos adicionais que podem não estar no requirements.txt
+    # Considerar mapeamentos entre nome do módulo e nome do pacote do pip
+    $moduleToPip = @{
+        'yaml' = 'pyyaml'
+    }
     foreach($pkg in $criticalPackages) {
-        if(-not $installed.ContainsKey($pkg.ToLowerInvariant()) -and -not $missing.Contains($pkg.ToLowerInvariant())) {
-            $missing += $pkg.ToLowerInvariant()
-            Write-Warn "Pacote crítico para validação de hash criptográfico '$pkg' não encontrado."
+        $key = $pkg.ToLowerInvariant()
+        $pipName = if($moduleToPip.ContainsKey($key)) { $moduleToPip[$key] } else { $key }
+        if(-not $installed.ContainsKey($key) -and -not $installed.ContainsKey($pipName) -and -not $missing.Contains($pipName)) {
+            $missing += $pipName
+            Write-Warn "Pacote crítico do projeto '$pkg' não encontrado (pip: '$pipName')."
         }
     }
     

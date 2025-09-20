@@ -230,6 +230,32 @@ app_jakarta/
  └─ log/ (maven_deploy.log)
 ```
 
+### Testar Login (Tomcat e WildFly)
+Os servidores ficam em `server/`. Abaixo o passo a passo para subir, publicar e validar login.
+
+Pré‑requisitos
+- PostgreSQL rodando: `docker compose up -d postgres`
+- Deploy feito pelo menu do `main.py` (ele cuida de aplicar datasource e publicar o WAR)
+
+Tomcat (porta 9090)
+1) Via `main.py`, escolha o deploy no Tomcat; o script coloca `ROOT.war` em `server/apache-tomcat-*/webapps` e reinicia se necessário.
+2) Abra: http://localhost:9090/
+3) Faça login com:
+  - admin@meuapp.com / Admin@123 (ADMIN)
+  - joao@exemplo.com / Admin@123 (USUARIO)
+
+WildFly (porta 8080)
+1) Configure o datasource de Postgres pelo `main.py` (gera `standalone.xml` a partir do template e garante o driver JDBC).
+2) Inicie o servidor (menu do `main.py` ou `server/wildfly-*/bin/standalone.bat`).
+3) O deploy via `main.py` publica como `ROOT.war` em `standalone/deployments`.
+4) Abra: http://localhost:8080/
+5) Login com as mesmas credenciais.
+
+Se o login falhar
+- Verifique o banco e variáveis `APP_DB_*` (se usou overrides)
+- Consulte logs: Tomcat `server/apache-tomcat-*/logs/`, WildFly `server/wildfly-*/standalone/log/server.log`
+- Reaplique o datasource e reinicie o servidor (Tomcat reinicia via script; WildFly precisa reiniciar para novo `standalone.xml`)
+
 —
 
 ### Licença e Suporte
