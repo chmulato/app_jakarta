@@ -1,6 +1,7 @@
 ## Projeto Java Web (Tomcat / WildFly)
 
 ![Capa do projeto](./doc/img/article_i.png)
+<sub><em>Capa do projeto — automação de build e deploy com foco em previsibilidade.</em></sub>
 
 Aplicação Java (Jakarta EE) com autenticação, automação de build/deploy via Python e banco PostgreSQL (Docker). Este README foi reorganizado para apresentar os principais cenários com imagens reais do projeto e guiar você rapidamente à execução fim a fim.
 
@@ -8,6 +9,7 @@ Aplicação Java (Jakarta EE) com autenticação, automação de build/deploy vi
 
 ### Visão geral
 ![Visão geral (secundária)](./doc/img/article_ii.png)
+<sub><em>Visão geral do fluxo: banco de dados, build, deploy e validação de login.</em></sub>
 
 - Código da aplicação: `meu-projeto-java`
 - Automação: `main.py` (menu + build/deploy/diagnóstico)
@@ -146,6 +148,7 @@ Tomcat (recomendado via `main.py`):
 - Acesso: http://localhost:9090/
 
 ![Página inicial no Tomcat (porta 9090)](./doc/img/index_tomcat_9090.png)
+<sub><em>Aplicação publicada no Tomcat (porta 9090) com contexto ROOT.</em></sub>
 
 Tomcat (plugin Maven de desenvolvimento):
 ```powershell
@@ -159,6 +162,7 @@ WildFly:
 - Console: http://localhost:9990/
 
 ![Página inicial no WildFly (porta 8080)](./doc/img/index_wildfly_8080.png)
+<sub><em>Aplicação publicada no WildFly (porta 8080) com contexto ROOT.</em></sub>
 
 Portas podem ser ajustadas no `main.py` (`TOMCAT_PORT`, `WILDFLY_PORT`) ou nas configurações dos servidores.
 

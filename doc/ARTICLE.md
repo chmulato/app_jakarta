@@ -1,6 +1,7 @@
 ## Do código ao valor em minutos: automação que acelera entregas e reduz riscos
 
 ![Imagem principal do artigo](./img/article_i.png)
+<sub><em>Automação do build e deploy: do código ao valor com previsibilidade.</em></sub>
 
 Empresas que lidam com aplicações corporativas costumam enfrentar o mesmo dilema: como transformar código em valor de negócio com rapidez e previsibilidade, sem aumentar riscos operacionais? Nosso time encarou esse desafio ao modernizar o fluxo de validação e publicação de uma aplicação Java baseada em Jakarta EE, rodando nos servidores de aplicação Tomcat e WildFly.
 
@@ -21,6 +22,7 @@ Criamos um orquestrador leve em Python que padroniza o caminho “do build ao lo
 Tudo isso com logs claros e passos idempotentes, para que o mesmo comando funcione de forma confiável na sua máquina e no ambiente de testes.
 
 ![Imagem secundária do artigo](./img/article_ii.png)
+<sub><em>Fluxo fim a fim: banco de dados, build, deploy e validação de login.</em></sub>
 
 ### O que muda no dia a dia
 
