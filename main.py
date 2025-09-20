@@ -4392,22 +4392,23 @@ def main():
             except Exception as e:
                 log(f"Erro ao tentar semear usuário ADMIN: {e}", "WARNING")
 
-            # 3) Build do WAR se necessário
-            war_path = find_built_war()
-            if not war_path:
-                log("WAR não encontrado em target/. Gerando artefatos com Maven (profile tomcat)...", "INFO")
+            # 3) Build do WAR no início (sempre)
+            log("Iniciando build Maven no início da opção 12 (clean package -DskipTests)...", "INFO")
+            mvn_res = execute_maven_command("clean package", additional_params="-DskipTests")
+            if not mvn_res.get("success"):
+                log("Build padrão falhou, tentando com perfil 'tomcat'...", "WARNING")
                 mvn_res = execute_maven_command("clean package", profile="tomcat", additional_params="-DskipTests")
                 if not mvn_res.get("success"):
-                    log("Falha ao gerar WAR para Tomcat.", "ERROR")
+                    log("Falha ao gerar WAR mesmo com perfil 'tomcat'.", "ERROR")
                     if not NON_INTERACTIVE:
                         input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
                     continue
-                war_path = find_built_war()
-                if not war_path:
-                    log("Ainda não achei o WAR após o build.", "ERROR")
-                    if not NON_INTERACTIVE:
-                        input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
-                    continue
+            war_path = find_built_war()
+            if not war_path:
+                log("Após o build, nenhum WAR foi localizado em target/.", "ERROR")
+                if not NON_INTERACTIVE:
+                    input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
+                continue
 
             # 4) Deploy Tomcat (frio)
             log("Realizando cold deploy no Tomcat...", "INFO")
