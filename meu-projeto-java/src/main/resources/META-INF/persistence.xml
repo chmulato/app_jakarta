@@ -7,6 +7,8 @@
 
     <persistence-unit name="meuAppPU" transaction-type="RESOURCE_LOCAL">
         <provider>org.hibernate.jpa.HibernatePersistenceProvider</provider>
+        <!-- Em ambientes de servidor (WildFly), usar o datasource explícito para evitar default ExampleDS -->
+        <non-jta-data-source>java:/jdbc/PostgresDS</non-jta-data-source>
         
         <!-- Entidades JPA -->
         <class>com.exemplo.model.Usuario</class>
