@@ -18,6 +18,7 @@ import platform
 import shutil
 import time
 import logging
+import builtins
 # Se não estiver em venv, reexecuta com o Python da venv (se existir)
 try:
     base = getattr(sys, "base_prefix", None) or getattr(sys, "real_prefix", None)
@@ -31,6 +32,28 @@ except Exception:
     pass
 import tempfile
 import glob
+
+# Modo não interativo (permitir passar a opção pela linha de comando e evitar prompts)
+NON_INTERACTIVE = False
+PRESELECTED_OPTION = None
+
+def _infer_preselected_option_from_argv():
+    """Inferir opção passada como primeiro argumento posicional (ex.: `python main.py 2` ou `python main.py test-login`).
+    Define NON_INTERACTIVE=True e evita chamadas bloqueantes de input em modo não interativo.
+    """
+    global NON_INTERACTIVE, PRESELECTED_OPTION
+    # Se o primeiro argumento não for um flag (não começa com '-') tratamos como opção
+    if len(sys.argv) >= 2 and not str(sys.argv[1]).startswith("-"):
+        PRESELECTED_OPTION = str(sys.argv[1]).strip()
+        NON_INTERACTIVE = True
+        # Evitar qualquer input() bloqueante
+        try:
+            builtins.input = lambda prompt="": ""
+        except Exception:
+            pass
+
+# Inferir antes de validar ambiente (para evitar prompts)
+_infer_preselected_option_from_argv()
 
 def validate_python_environment():
     """
@@ -62,16 +85,20 @@ def validate_python_environment():
             print("=" * 80)
             
             # Perguntar se quer continuar mesmo assim
-            try:
-                choice = input("Deseja continuar mesmo assim? (S/N): ").strip().upper()
-                if choice != 'S':
-                    print("Execução cancelada. Use o Python da venv para melhor compatibilidade.")
+            # Em modo não-interativo, continuar automaticamente
+            if NON_INTERACTIVE:
+                print("Modo não interativo: continuando automaticamente com Python atual...")
+            else:
+                try:
+                    choice = input("Deseja continuar mesmo assim? (S/N): ").strip().upper()
+                    if choice != 'S':
+                        print("Execução cancelada. Use o Python da venv para melhor compatibilidade.")
+                        sys.exit(1)
+                    else:
+                        print("Continuando com Python global... (pode haver problemas de dependências)")
+                except KeyboardInterrupt:
+                    print("\nExecução cancelada.")
                     sys.exit(1)
-                else:
-                    print("Continuando com Python global... (pode haver problemas de dependências)")
-            except KeyboardInterrupt:
-                print("\nExecução cancelada.")
-                sys.exit(1)
         else:
             print("=" * 80)
             print("⚠️  AVISO: Virtual environment não encontrada!")
@@ -106,6 +133,8 @@ import re
 import argparse
 from datetime import datetime
 from pathlib import Path
+import socket
+from urllib.parse import urljoin
 
 # Variáveis globais
 WORKSPACE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -144,6 +173,8 @@ def build_arg_parser():
     parser.add_argument("--tomcat-dir", dest="tomcat_dir", help="Caminho do Tomcat para override")
     parser.add_argument("--wildfly-dir", dest="wildfly_dir", help="Caminho do WildFly para override")
     parser.add_argument("--only-check", action="store_true", help="Apenas verificar ambiente e sair")
+    # Aceitar uma opção posicional (número ou nome), ex.: 2, deploy-tomcat, wildfly, iniciar-tomcat, test-login
+    parser.add_argument("option", nargs="?", help="Opção do menu (0-12) ou nome: check, deploy-tomcat, start-tomcat, deploy-wildfly, start-wildfly, undeploy, diag-tomcat, diag-wildfly, set-tomcat-port, cfg-wildfly-ds, cfg-tomcat-ds, test-login")
     return parser
 
 # Configuração de portas para os servidores
@@ -152,17 +183,23 @@ TOMCAT_PORT = 9090
 WILDFLY_PORT_OFFSET = 0  # WildFly na porta padrão (8080), não precisa de offset
 WILDFLY_MANAGEMENT_PORT = 9990  # Porta de administração padrão (9990)
 
-# Configuração de logging
+# Configuração de logging (arquivo por dia)
 LOG_DIR = os.path.join(WORKSPACE_DIR, "log")
 # Criar o diretório de log se não existir
-if not os.path.exists(LOG_DIR):
-    os.makedirs(LOG_DIR, exist_ok=True)
+os.makedirs(LOG_DIR, exist_ok=True)
+
+# Nome base configurável do arquivo de log (APP_LOG_BASENAME), padrão 'maven_deploy'
+LOG_BASENAME = os.environ.get("APP_LOG_BASENAME", "maven_deploy")
+
+# Nome do arquivo com data do dia (formato: YYYY_MM_DD_nome.log)
+_today_str = datetime.now().strftime("%Y_%m_%d")
+_log_file = os.path.join(LOG_DIR, f"{_today_str}_{LOG_BASENAME}.log")
 
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(os.path.join(LOG_DIR, "maven_deploy.log")),
+        logging.FileHandler(_log_file, encoding='utf-8'),
         logging.StreamHandler()
     ]
 )
@@ -211,6 +248,474 @@ def log(message, level="INFO"):
     
     print(f"{timestamp} - {color}{level}{Colors.END}: {message}")
 
+def normalize_option(opt: str | None) -> str | None:
+    if not opt:
+        return None
+    m = str(opt).strip().lower()
+    aliases = {
+        "1": "1", "check": "1", "verify": "1", "verificar": "1",
+        "2": "2", "deploy-tomcat": "2", "tomcat-deploy": "2",
+        "3": "3", "start-tomcat": "3", "tomcat-start": "3",
+        "4": "4", "deploy-wildfly": "4", "wildfly-deploy": "4",
+        "5": "5", "start-wildfly": "5", "wildfly-start": "5",
+        "6": "6", "undeploy": "6", "limpar": "6",
+        "7": "7", "diag-tomcat": "7",
+        "8": "8", "diag-wildfly": "8",
+        "9": "9", "set-tomcat-port": "9", "porta-tomcat": "9",
+        "10": "10", "cfg-wildfly-ds": "10", "wildfly-ds": "10",
+        "11": "11", "cfg-tomcat-ds": "11", "tomcat-ds": "11",
+        "12": "12", "test-login": "12", "login": "12",
+        "0": "0", "sair": "0", "exit": "0",
+    }
+    return aliases.get(m, opt if m.isdigit() else None)
+
+def is_server_up(host: str, port: int, timeout: float = 2.0) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except Exception:
+        return False
+
+def ensure_docker_db_up(timeout: int = 60) -> bool:
+    """Garante que o Postgres do docker-compose esteja em execução."""
+    try:
+        # Verificar se docker está disponível
+        proc = subprocess.run(["docker", "--version"], capture_output=True, text=True, timeout=5)
+        if proc.returncode != 0:
+            log("Docker não está disponível; seguindo sem subir DB via Compose.", "WARNING")
+            return False
+    except Exception:
+        log("Docker não está disponível; seguindo sem subir DB via Compose.", "WARNING")
+        return False
+
+    # Tentar subir serviços
+    try:
+        log("Subindo serviços do docker-compose (se necessários)...", "INFO")
+        subprocess.run(["docker", "compose", "up", "-d"], cwd=WORKSPACE_DIR, check=False)
+    except Exception as e:
+        log(f"Falha ao executar docker compose up -d: {e}", "WARNING")
+
+    # Aguardar porta do Postgres
+    db_cfg = load_db_config_from_compose()
+    host = db_cfg.get("host", "localhost")
+    port = int(str(db_cfg.get("port", 5432)).split(":")[-1]) if isinstance(db_cfg.get("port"), str) else int(db_cfg.get("port", 5432))
+    start = time.time()
+    while time.time() - start < timeout:
+        try:
+            with socket.create_connection((host, port), timeout=1.5):
+                log(f"PostgreSQL disponível em {host}:{port}", "SUCCESS")
+                return True
+        except Exception:
+            time.sleep(2)
+    log("Timeout aguardando PostgreSQL do docker-compose.", "WARNING")
+    return False
+
+def restart_postgres_container(wait_seconds: int = 5) -> bool:
+    """Reinicia o contêiner Postgres para liberar conexões, caso esteja lotado."""
+    try:
+        # Tentar reiniciar pelo nome do contêiner conhecido no log
+        subprocess.run(["docker", "restart", "meu-app-postgres"], check=False)
+        time.sleep(wait_seconds)
+        return True
+    except Exception as e:
+        log(f"Falha ao reiniciar contêiner Postgres: {e}", "WARNING")
+        return False
+
+def ensure_tomcat_running_and_deployed() -> bool:
+    """Garante Tomcat iniciado e WAR implantado como ROOT ou meu-projeto-java."""
+    # Se não existe Tomcat, tentar baixar/instalar (já há helper de download nas opções 2/3)
+    # Aqui apenas iniciamos se possível; para garantir deploy total use opção 2.
+    if not os.path.exists(TOMCAT_DIR):
+        log(f"Tomcat não encontrado em {TOMCAT_DIR}", "WARNING")
+        return False
+    # Se não está rodando, tentar iniciar rápido (sem rebuild)
+    if not is_server_up("localhost", TOMCAT_PORT):
+        log("Tomcat não detectado; iniciando rapidamente...", "INFO")
+        try:
+            env = setup_tomcat_environment(TOMCAT_DIR)
+            bin_dir = os.path.join(TOMCAT_DIR, "bin")
+            if platform.system() == "Windows":
+                subprocess.Popen([os.path.join(bin_dir, "startup.bat")], shell=True, env=env)
+            else:
+                subprocess.Popen([os.path.join(bin_dir, "startup.sh")], env=env)
+            time.sleep(10)
+        except Exception as e:
+            log(f"Falha ao iniciar Tomcat: {e}", "ERROR")
+            return False
+    return is_server_up("localhost", TOMCAT_PORT)
+
+def ensure_wildfly_running_and_deployed() -> bool:
+    """Garante WildFly iniciado; para deploy confiável use a opção 4, aqui apenas start rápido."""
+    if not os.path.exists(WILDFLY_DIR):
+        log(f"WildFly não encontrado em {WILDFLY_DIR}", "WARNING")
+        return False
+    if not is_server_up("localhost", WILDFLY_PORT):
+        log("WildFly não detectado; iniciando rapidamente...", "INFO")
+        try:
+            env = setup_wildfly_environment()
+            bin_dir = os.path.join(WILDFLY_DIR, "bin")
+            if platform.system() == "Windows":
+                subprocess.Popen([os.path.join(bin_dir, "standalone.bat")], shell=True, env=env)
+            else:
+                subprocess.Popen([os.path.join(bin_dir, "standalone.sh")], env=env)
+            time.sleep(12)
+        except Exception as e:
+            log(f"Falha ao iniciar WildFly: {e}", "ERROR")
+            return False
+    return is_server_up("localhost", WILDFLY_PORT)
+
+def find_built_war() -> str | None:
+    """Procura um arquivo WAR gerado em target/ do projeto."""
+    try:
+        target = os.path.join(PROJECT_DIR, "target")
+        if os.path.exists(target):
+            wars = [f for f in os.listdir(target) if f.lower().endswith(".war")]
+            if wars:
+                return os.path.join(target, wars[0])
+    except Exception:
+        pass
+    return None
+
+def wait_for_port(port: int, timeout: int = 30) -> bool:
+    start = time.time()
+    while time.time() - start < timeout:
+        if is_server_up("localhost", port):
+            return True
+        time.sleep(1.5)
+    return False
+
+def wait_for_url(url: str, timeout: int = 30) -> bool:
+    start = time.time()
+    while time.time() - start < timeout:
+        try:
+            r = requests.get(url, timeout=3)
+            # Considerar pronto apenas respostas 2xx ou 3xx (não 404/401)
+            if 200 <= r.status_code < 400:
+                return True
+        except Exception:
+            pass
+        time.sleep(1.5)
+    return False
+
+def _mask_cookie_value(val: str) -> str:
+    try:
+        if not isinstance(val, str):
+            return str(val)
+        if len(val) <= 8:
+            return "***"
+        return val[:8] + "***"
+    except Exception:
+        return "***"
+
+def _parse_form_hidden_inputs(html: str) -> dict:
+    """
+    Extrai inputs type=hidden do HTML simples, sem dependências externas.
+    Retorna dict {name: value}.
+    """
+    try:
+        import re
+        hidden = {}
+        for tag in re.findall(r"<input[^>]*type=['\"]hidden['\"][^>]*>", html or "", flags=re.IGNORECASE):
+            name_m = re.search(r"name=['\"]([^'\"]+)['\"]", tag, flags=re.IGNORECASE)
+            if not name_m:
+                continue
+            val_m = re.search(r"value=['\"]([^'\"]*)['\"]", tag, flags=re.IGNORECASE)
+            hidden[name_m.group(1)] = val_m.group(1) if val_m else ""
+        return hidden
+    except Exception:
+        return {}
+
+def deploy_tomcat_root_quick(war_path: str) -> bool:
+    """Faz cold deploy no Tomcat (sem deploy a quente): para servidor, copia ROOT.war e inicia."""
+    if not os.path.exists(TOMCAT_DIR):
+        log(f"Tomcat não encontrado em: {TOMCAT_DIR}", "ERROR")
+        return False
+    # Parar se estiver rodando
+    if is_server_up("localhost", TOMCAT_PORT):
+        log("Tomcat em execução: realizando parada para cold deploy...", "INFO")
+        stop_tomcat_server()
+        time.sleep(3)
+    # Ajustar porta do Tomcat no server.xml, se possível
+    try:
+        configure_tomcat_port(TOMCAT_DIR, TOMCAT_PORT)
+    except Exception:
+        pass
+    # Limpar e copiar
+    webapps = os.path.join(TOMCAT_DIR, "webapps")
+    os.makedirs(webapps, exist_ok=True)
+    # Remover possíveis restos de deploy anterior
+    log("Tomcat: limpando webapps/ROOT e ROOT.war antes do deploy...", "INFO")
+    for item in ("ROOT", "ROOT.war"):
+        p = os.path.join(webapps, item)
+        try:
+            if os.path.isdir(p):
+                log(f" - Removendo diretório: {p}", "INFO")
+                shutil.rmtree(p, ignore_errors=True)
+            elif os.path.isfile(p):
+                log(f" - Removendo arquivo: {p}", "INFO")
+                os.remove(p)
+        except Exception:
+            pass
+    # Limpar pastas temp e work do Tomcat para evitar cache de classes/arquivos
+    log("Tomcat: limpando diretórios temp/ e work/ antes do deploy...", "INFO")
+    for folder in ("temp", "work"):
+        fp = os.path.join(TOMCAT_DIR, folder)
+        try:
+            if os.path.isdir(fp):
+                log(f" - Limpando diretório: {fp}", "INFO")
+                shutil.rmtree(fp, ignore_errors=True)
+                os.makedirs(fp, exist_ok=True)
+        except Exception:
+            pass
+    try:
+        shutil.copy2(war_path, os.path.join(webapps, "ROOT.war"))
+        log("WAR copiado para Tomcat como ROOT.war", "SUCCESS")
+    except Exception as e:
+        log(f"Falha ao copiar WAR para Tomcat: {e}", "ERROR")
+        return False
+    # Iniciar
+    try:
+        env = setup_tomcat_environment(TOMCAT_DIR)
+        bin_dir = os.path.join(TOMCAT_DIR, "bin")
+        if platform.system() == "Windows":
+            subprocess.Popen([os.path.join(bin_dir, "startup.bat")], shell=True, env=env)
+        else:
+            subprocess.Popen([os.path.join(bin_dir, "startup.sh")], env=env)
+        if not wait_for_port(TOMCAT_PORT, timeout=40):
+            log("Tomcat não respondeu na porta esperada após iniciar.", "WARNING")
+        return True
+    except Exception as e:
+        log(f"Falha ao iniciar Tomcat: {e}", "ERROR")
+        return False
+
+def deploy_wildfly_root_quick(war_path: str) -> bool:
+    """Faz hot deploy no WildFly: inicia se necessário e copia WAR como ROOT.war para deployments."""
+    if not os.path.exists(WILDFLY_DIR):
+        log(f"WildFly não encontrado em: {WILDFLY_DIR}", "ERROR")
+        return False
+    # Iniciar se necessário
+    if not is_server_up("localhost", WILDFLY_PORT):
+        log("WildFly não detectado; iniciando...", "INFO")
+        try:
+            env = setup_wildfly_environment()
+            bin_dir = os.path.join(WILDFLY_DIR, "bin")
+            if platform.system() == "Windows":
+                subprocess.Popen([os.path.join(bin_dir, "standalone.bat")], shell=True, env=env)
+            else:
+                subprocess.Popen([os.path.join(bin_dir, "standalone.sh")], env=env)
+        except Exception as e:
+            log(f"Falha ao iniciar WildFly: {e}", "ERROR")
+            return False
+        wait_for_port(WILDFLY_PORT, timeout=40)
+    # Copiar WAR
+    deployments = os.path.join(WILDFLY_DIR, "standalone", "deployments")
+    os.makedirs(deployments, exist_ok=True)
+    for item in ("ROOT.war", "ROOT.war.deployed", "ROOT.war.failed", "ROOT.war.undeployed", "ROOT.war.isdeploying"):
+        p = os.path.join(deployments, item)
+        try:
+            if os.path.isfile(p):
+                os.remove(p)
+        except Exception:
+            pass
+    try:
+        dest = os.path.join(deployments, "ROOT.war")
+        shutil.copy2(war_path, dest)
+        log("WAR copiado para WildFly como ROOT.war (hot deploy)", "SUCCESS")
+        # Criar .dodeploy para forçar scanner, caso necessário
+        try:
+            open(dest + ".dodeploy", "w").close()
+        except Exception:
+            pass
+    except Exception as e:
+        log(f"Falha ao copiar WAR para WildFly: {e}", "ERROR")
+        return False
+    # Aguardar marker .deployed ou sucesso de URL
+    deployed_marker = os.path.join(deployments, "ROOT.war.deployed")
+    start = time.time()
+    while time.time() - start < 45:
+        if os.path.exists(deployed_marker):
+            return True
+        if wait_for_url(f"http://localhost:{WILDFLY_PORT}/", timeout=1):
+            return True
+        time.sleep(1.5)
+    log("WildFly: não confirmou deployment do ROOT.war dentro do tempo.", "WARNING")
+    return False
+
+def _candidate_login_urls(base_url: str) -> list[str]:
+    # Tentar primeiro raiz /login e depois contexto /meu-projeto-java/login
+    paths = ["login", "meu-projeto-java/login"]
+    result = []
+    for p in paths:
+        u = urljoin(base_url, p)
+        if u not in result:
+            result.append(u)
+    return result
+
+
+def test_login(base_url: str, email: str = "admin@meuapp.com", senha: str = "Admin@123", timeout: int = 20, max_wait: int = 60) -> bool:
+    """
+    Realiza um POST em /login com as credenciais fornecidas e valida o resultado.
+    - Aguarda a rota /login ficar disponível antes de postar (até max_wait segundos).
+    - Tenta múltiplas combinações de parâmetros (email/senha, email/password, username/password).
+    Assume que a aplicação está publicada como ROOT (contexto '/').
+    """
+    try:
+        s = requests.Session()
+        # Headers comuns para simular um navegador
+        common_headers = {
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+            "User-Agent": "app_jakarta-login-tester/1.0",
+        }
+        candidates = _candidate_login_urls(base_url)
+        for login_url in candidates:
+            # Esperar a página de login responder antes do POST
+            if not wait_for_url(login_url, timeout=max_wait):
+                log(f"Rota de login não respondeu em {max_wait}s: {login_url}", "WARNING")
+                continue
+            # Acessar a página de login para obter cookies/sessão
+            try:
+                r1 = s.get(login_url, timeout=timeout, headers=common_headers)
+                # Cookies de sessão
+                ck = {k: _mask_cookie_value(v) for k, v in s.cookies.get_dict().items()}
+                log(f"Sessão inicial: cookies capturados: {ck}", "INFO")
+                # Inputs ocultos (se houver, ex.: tokens/CSRF)
+                hidden = _parse_form_hidden_inputs(getattr(r1, "text", ""))
+                if hidden:
+                    log(f"Campos ocultos detectados no formulário de login: {list(hidden.keys())}", "INFO")
+                else:
+                    hidden = {}
+            except Exception:
+                hidden = {}
+            # Tentar variações de parâmetros
+            param_variants = [
+                {"email": email, "senha": senha},
+                {"email": email, "senha": senha, "lembrar": "on"},
+                {"email": email, "password": senha},
+                {"username": email, "password": senha},
+            ]
+            for data in param_variants:
+                try:
+                    # Combinar inputs ocultos (não sobrescreve chaves explícitas)
+                    merged = {**hidden, **data}
+                    headers = {
+                        **common_headers,
+                        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                        "Origin": base_url.rstrip("/"),
+                        "Referer": login_url,
+                    }
+                    log(f"POST /login com params {list(data.keys())} + hidden {list(hidden.keys())}", "INFO")
+                    r2 = s.post(login_url, data=merged, timeout=timeout, allow_redirects=False, headers=headers)
+                except requests.RequestException as e:
+                    log(f"Falha de rede ao testar login ({list(data.keys())}): {e}", "WARNING")
+                    continue
+                # Sucesso comum: 3xx redirecionando para página inicial/dashboard
+                if r2.status_code in (301, 302, 303, 307, 308):
+                    log(f"Login bem-sucedido (HTTP {r2.status_code}) → Location: {r2.headers.get('Location', '')}", "SUCCESS")
+                    return True
+                # Caso não haja redirect, analisar códigos e conteúdo
+                if r2.status_code == 200:
+                    # Pequeno trecho para diagnóstico (sem dados sensíveis)
+                    body_text = (r2.text or "")
+                    diag_snippet = body_text[:200].replace("\n", " ").replace("\r", " ")
+                    log(f"Resposta 200 de /login — snippet: {diag_snippet}", "INFO")
+                    text = body_text.lower()
+                    if ("credenciais" in text) or ("login" in text and "erro" in text):
+                        log("Login falhou: página de erro/credenciais retornada.", "ERROR")
+                        # tentar próxima variação
+                        continue
+                    log("Login aparentemente bem-sucedido (HTTP 200).", "SUCCESS")
+                    return True
+                if r2.status_code in (401, 403, 404):
+                    log(f"Login falhou (HTTP {r2.status_code}) com params {list(data.keys())}.", "ERROR")
+                    continue
+                log(f"Login não confirmado (HTTP {r2.status_code}) com params {list(data.keys())}.", "WARNING")
+        return False
+    except requests.RequestException as e:
+        log(f"Falha de rede ao testar login: {e}", "ERROR")
+        return False
+    except Exception as e:
+        log(f"Erro ao testar login: {e}", "ERROR")
+        return False
+
+def test_login_browser(base_url: str, email: str = "admin@meuapp.com", senha: str = "Admin@123", max_wait: int = 60, headless: bool = True) -> bool:
+    """
+    Realiza o fluxo de login em um navegador headless usando Playwright.
+    Útil para ambientes (como WildFly) que exigem fluxo real de navegador.
+    Retorna True se após o submit formos redirecionados para /dashboard.
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception as e:
+        log(f"Playwright não disponível: {e}", "WARNING")
+        return False
+    try:
+        candidates = _candidate_login_urls(base_url)
+        start = time.time()
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=headless)
+            context = browser.new_context()
+            page = context.new_page()
+            page.set_default_timeout(15000)
+            for login_url in candidates:
+                # Esperar rota /login ficar de pé
+                if not wait_for_url(login_url, timeout=max_wait):
+                    log(f"Rota de login não respondeu em {max_wait}s: {login_url}", "WARNING")
+                    continue
+                # Navegar até login e tentar autenticar
+                page.goto(login_url)
+                # Preencher campos
+                filled = False
+                for sel in ["input[name=email]", "#email", "input[type=email]"]:
+                    try:
+                        page.fill(sel, email)
+                        filled = True
+                        break
+                    except Exception:
+                        continue
+                for sel in ["input[name=senha]", "#senha", "input[name=password]", "input[type=password]"]:
+                    try:
+                        page.fill(sel, senha)
+                        break
+                    except Exception:
+                        continue
+                # Submeter
+                try:
+                    page.click("button[type=submit], #btnLogin, form button")
+                except Exception:
+                    try:
+                        page.press("input[type=password]", "Enter")
+                    except Exception:
+                        pass
+                # Aguardar destino
+                target_ok = False
+                try:
+                    page.wait_for_url(lambda url: "/dashboard" in url, timeout=15000)
+                    target_ok = True
+                except Exception:
+                    current = page.url or ""
+                    if "/dashboard" in current:
+                        target_ok = True
+                if not target_ok:
+                    try:
+                        content = page.content().lower()
+                        if "dashboard" in content and "logout" in content:
+                            target_ok = True
+                    except Exception:
+                        pass
+                if target_ok:
+                    context.close()
+                    browser.close()
+                    log("Login via navegador validado (redirecionado para /dashboard).", "SUCCESS")
+                    return True
+            context.close()
+            browser.close()
+            log("Login via navegador não confirmou /dashboard em nenhum caminho testado.", "ERROR")
+            return False
+    except Exception as e:
+        log(f"Erro no teste de login via navegador: {e}", "ERROR")
+        return False
+
 def http_download(url, dest_path, timeout=30, max_retries=3, backoff_seconds=2, chunk_size=8192):
     """
     Faz download HTTP com retries exponenciais e tratamento de exceções.
@@ -254,6 +759,112 @@ def http_download(url, dest_path, timeout=30, max_retries=3, backoff_seconds=2, 
                 time.sleep(sleep_for)
             except Exception:
                 pass
+
+def ensure_admin_seed(email: str = "admin@meuapp.com", senha: str = "Admin@123") -> bool:
+    """
+    Garante que exista ao menos um usuário ADMIN no banco (idempotente).
+    - Usa credenciais do docker-compose (ou APP_DB_* via env).
+    - Se não houver ADMIN, insere um com email/senha informados (hash BCrypt custo 10).
+    """
+    try:
+        db = load_db_config_from_compose()
+        host = db.get("host", "localhost")
+        port = str(db.get("port", "5432"))
+        name = db.get("name", "meu_app_db")
+        user = db.get("user", "meu_app_user")
+        pwd = db.get("password", "meu_app_password")
+
+        try:
+            import psycopg2  # type: ignore
+        except Exception as e:
+            log(f"psycopg2 não disponível para semear ADMIN: {e}", "WARNING")
+            return False
+
+        # Tentar gerar hash com bcrypt; caso indisponível, usar hash conhecido de Admin@123
+        hash_bcrypt = "$2a$10$rF1YS1T.8QVXnpTlI.JY5u5Kz7x8TXDQ9Y2c3M4z6N8x.wJ4sA2G6"
+        try:
+            import bcrypt  # type: ignore
+            try:
+                hash_bcrypt = bcrypt.hashpw(senha.encode("utf-8"), bcrypt.gensalt(rounds=10)).decode("utf-8")
+            except Exception:
+                pass
+        except Exception:
+            # manter hash padrão
+            pass
+
+        conn = None
+        try:
+            conn = psycopg2.connect(host=host, port=port, database=name, user=user, password=pwd)
+            conn.autocommit = False
+            cur = conn.cursor()
+            # Criar tabela se não existir (compatível com entidade)
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS usuarios (
+                    id SERIAL PRIMARY KEY,
+                    nome VARCHAR(100) NOT NULL,
+                    email VARCHAR(150) UNIQUE NOT NULL,
+                    senha VARCHAR(255) NOT NULL,
+                    ativo BOOLEAN DEFAULT true,
+                    perfil VARCHAR(20) DEFAULT 'USUARIO' CHECK (perfil IN ('ADMIN','USUARIO')),
+                    data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    data_atualizacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            # Verificar existência de ADMIN
+            # Verificar se já existe ADMIN e validar senha; se não combinar, atualizar para o hash gerado
+            cur.execute("SELECT id, email, senha FROM usuarios WHERE perfil = 'ADMIN' ORDER BY id ASC LIMIT 1")
+            row = cur.fetchone()
+            if row:
+                admin_id, admin_email, admin_hash = row[0], row[1], row[2] or ""
+                # Se o email padrão não existir mas há outro admin, manter; apenas garantir que ao menos um admin tem a senha esperada
+                needs_update = False
+                try:
+                    import bcrypt  # type: ignore
+                    try:
+                        needs_update = not bcrypt.checkpw(senha.encode("utf-8"), admin_hash.encode("utf-8"))
+                    except Exception:
+                        needs_update = (admin_hash != hash_bcrypt)
+                except Exception:
+                    needs_update = (admin_hash != hash_bcrypt)
+
+                if needs_update:
+                    cur.execute("UPDATE usuarios SET senha = %s WHERE id = %s", (hash_bcrypt, admin_id))
+                    log(f"Senha do ADMIN (id={admin_id}) atualizada para o hash esperado de testes.", "INFO")
+                else:
+                    log("Senha do ADMIN já corresponde ao esperado para testes.", "INFO")
+                conn.commit()
+                return True
+            # Inserir ADMIN padrão
+            cur.execute(
+                """
+                INSERT INTO usuarios (nome, email, senha, perfil, ativo)
+                VALUES (%s, %s, %s, 'ADMIN', true)
+                ON CONFLICT (email) DO NOTHING
+                """,
+                ("Administrador", email, hash_bcrypt)
+            )
+            conn.commit()
+            log("Usuário ADMIN padrão criado para testes (altere a senha depois).", "SUCCESS")
+            return True
+        except Exception as e:
+            try:
+                if conn:
+                    conn.rollback()
+            except Exception:
+                pass
+            log(f"Falha ao semear usuário ADMIN: {e}", "WARNING")
+            return False
+        finally:
+            try:
+                if conn:
+                    conn.close()
+            except Exception:
+                pass
+    except Exception as e:
+        log(f"Erro inesperado no seed de ADMIN: {e}", "WARNING")
+        return False
 
 def load_db_config_from_compose():
     """
@@ -576,19 +1187,31 @@ def check_database_connection():
         # Se o módulo psycopg2 estiver instalado
         try:
             import psycopg2
-            conn = psycopg2.connect(
-                host=db_host,
-                port=db_port,
-                database=db_name,
-                user=db_user,
-                password=db_password
-            )
-            conn.close()
-            return True, f"Conectado ao banco de dados PostgreSQL: {db_host}:{db_port}/{db_name}"
+            def _try_connect():
+                conn = psycopg2.connect(
+                    host=db_host,
+                    port=db_port,
+                    database=db_name,
+                    user=db_user,
+                    password=db_password
+                )
+                conn.close()
+            try:
+                _try_connect()
+                return True, f"Conectado ao banco de dados PostgreSQL: {db_host}:{db_port}/{db_name}"
+            except Exception as e:
+                msg = str(e)
+                if "too many clients" in msg.lower():
+                    log("PostgreSQL retornou 'too many clients' — reiniciando contêiner e tentando novamente...", "WARNING")
+                    restart_postgres_container()
+                    try:
+                        _try_connect()
+                        return True, f"Conexão restabelecida após reinício do Postgres: {db_host}:{db_port}/{db_name}"
+                    except Exception as e2:
+                        return False, f"Erro ao conectar ao banco de dados após reinício: {str(e2)}"
+                return False, f"Erro ao conectar ao banco de dados: {msg}"
         except ImportError:
             return True, "Módulo psycopg2 não instalado, mas contêiner PostgreSQL está em execução"
-        except Exception as e:
-            return False, f"Erro ao conectar ao banco de dados: {str(e)}"
             
     except (subprocess.SubprocessError, FileNotFoundError):
         return False, "Não foi possível verificar o status do PostgreSQL. Docker não está disponível."
@@ -2807,17 +3430,23 @@ def stop_tomcat_server():
     log("Parando servidor Tomcat...", "INFO")
     
     try:
+        env = setup_tomcat_environment(TOMCAT_DIR)
         if platform.system() == "Windows":
             cmd = [os.path.join(TOMCAT_DIR, "bin", "shutdown.bat")]
-            subprocess.run(cmd, shell=True, check=False)
+            subprocess.run(cmd, shell=True, check=False, env=env)
         else:
             cmd = [os.path.join(TOMCAT_DIR, "bin", "shutdown.sh")]
-            subprocess.run(cmd, shell=True, check=False)
-        
-        # Aguardar o servidor parar
-        time.sleep(5)
-        log("Servidor Tomcat parado com sucesso", "SUCCESS")
-        return True
+            subprocess.run(cmd, shell=True, check=False, env=env)
+
+        # Aguardar o servidor parar (checar porta fechada)
+        start = time.time()
+        while time.time() - start < 25:
+            if not is_server_up("localhost", TOMCAT_PORT):
+                log("Servidor Tomcat parado com sucesso", "SUCCESS")
+                return True
+            time.sleep(1.5)
+        log("Tomcat não fechou a porta no tempo esperado; prosseguindo com limpeza mesmo assim.", "WARNING")
+        return False
     except Exception as e:
         log(f"Erro ao parar o servidor Tomcat: {str(e)}", "ERROR")
         return False
@@ -2927,6 +3556,11 @@ def main():
         log("--only-check detectado: verificando ambiente e saindo...", "INFO")
         check_environment()
         return
+
+    # Detectar opção passada via CLI (posicional) ou pré-inferida
+    cli_option = normalize_option(getattr(args, 'option', None) or PRESELECTED_OPTION)
+    if cli_option is not None:
+        log(f"Executando em modo não interativo com opção: {cli_option}", "INFO")
     
     # Variáveis para controlar os servidores em execução
     tomcat_process = None
@@ -2939,6 +3573,9 @@ def main():
     
     exit_menu = False
     
+    # Se vier opção pela CLI, executa só uma vez
+    cli_option_once = cli_option
+
     while not exit_menu:
         print(f"\n{Colors.CYAN}Menu Principal:{Colors.END}")
         print(f"{Colors.BLUE}1. Verificar ambiente (Java, Maven, Docker, BD){Colors.END}")
@@ -2952,14 +3589,22 @@ def main():
         print(f"{Colors.BLUE}9. Aplicar porta 9090 no Tomcat e reiniciar{Colors.END}")
         print(f"{Colors.BLUE}10. Configurar datasource PostgreSQL no WildFly{Colors.END}")
         print(f"{Colors.BLUE}11. Configurar datasource PostgreSQL no Tomcat{Colors.END}")
+        print(f"{Colors.BLUE}12. Testar login da aplicação (Tomcat/WildFly){Colors.END}")
         print(f"{Colors.BLUE}0. Sair{Colors.END}")
         
-        option = input(f"\n{Colors.CYAN}Escolha uma opção: {Colors.END}").strip()
+        if cli_option_once is not None:
+            option = cli_option_once
+            cli_option_once = None
+            # rodar apenas uma vez
+            exit_menu = True
+        else:
+            option = input(f"\n{Colors.CYAN}Escolha uma opção: {Colors.END}").strip()
         
         if option == "1":
             log("Verificando ambiente...", "INFO")
             check_environment()
-            input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
+            if not NON_INTERACTIVE:
+                input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
         
         elif option == "2":
             log("Iniciando processo de deploy no Tomcat...", "INFO")
@@ -2971,7 +3616,8 @@ def main():
             
             if not java_installed or not maven_installed:
                 log("Requisitos mínimos não atendidos. Verifique o ambiente primeiro (opção 1).", "ERROR")
-                input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
+                if not NON_INTERACTIVE:
+                    input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
                 continue
             
             MAVEN_CMD = maven_cmd
@@ -3016,7 +3662,8 @@ def main():
                 
                 if not war_files:
                     log("Nenhum arquivo WAR encontrado. Falha no processo de deploy para Tomcat.", "ERROR")
-                    input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
+                    if not NON_INTERACTIVE:
+                        input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
                     continue
                     
             war_file = os.path.join(target_dir, war_files[0])
@@ -3208,7 +3855,8 @@ def main():
             print(f"{Colors.GREEN}Acesse a aplicação em: http://localhost:{TOMCAT_PORT}/meu-projeto-java/{Colors.END}")
             print(f"{Colors.GREEN}{'=' * 60}{Colors.END}")
             
-            input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
+            if not NON_INTERACTIVE:
+                input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
         
         elif option == "3":
             log("Iniciando servidor Tomcat (sem deploy)...", "INFO")
@@ -3218,7 +3866,8 @@ def main():
             if tomcat_running:
                 log(f"Servidor Tomcat já está em execução na porta {TOMCAT_PORT}", "SUCCESS")
                 log(f"Aplicação disponível em: http://localhost:{TOMCAT_PORT}/meu-projeto-java/", "SUCCESS")
-                input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
+                if not NON_INTERACTIVE:
+                    input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
                 continue
             
             # Verificar se o Tomcat existe
@@ -3279,7 +3928,8 @@ def main():
             print(f"{Colors.GREEN}Porta: {TOMCAT_PORT}{Colors.END}")
             print(f"{Colors.GREEN}{'=' * 60}{Colors.END}")
             
-            input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
+            if not NON_INTERACTIVE:
+                input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
         
         elif option == "4":
             log("Iniciando processo de deploy no WildFly...", "INFO")
@@ -3520,7 +4170,8 @@ def main():
             print(f"{Colors.GREEN}Acesse a aplicação em: http://localhost:{WILDFLY_PORT}/meu-projeto-java/{Colors.END}")
             print(f"{Colors.GREEN}{'=' * 60}{Colors.END}")
             
-            input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
+            if not NON_INTERACTIVE:
+                input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
         
         elif option == "5":
             log("Iniciando servidor WildFly (sem deploy)...", "INFO")
@@ -3601,7 +4252,8 @@ def main():
             print(f"{Colors.GREEN}Console Admin: http://localhost:{WILDFLY_MANAGEMENT_PORT}/console{Colors.END}")
             print(f"{Colors.GREEN}{'=' * 60}{Colors.END}")
             
-            input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
+            if not NON_INTERACTIVE:
+                input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
         
         elif option == "6":
             log("Iniciando processo de undeploy (limpeza de deployments)...", "INFO")
@@ -3642,17 +4294,20 @@ def main():
             
             log("Processo de undeploy concluído com sucesso", "SUCCESS")
             
-            input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
+            if not NON_INTERACTIVE:
+                input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
         
         elif option == "7":
             log("Iniciando diagnóstico do Tomcat...", "INFO")
             check_tomcat_environment()
-            input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
+            if not NON_INTERACTIVE:
+                input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
             
         elif option == "8":
             log("Iniciando diagnóstico do WildFly...", "INFO")
             check_wildfly_environment()
-            input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
+            if not NON_INTERACTIVE:
+                input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
         
         elif option == "9":
             log(f"Aplicando porta {TOMCAT_PORT} no Tomcat e reiniciando...", "INFO")
@@ -3711,6 +4366,123 @@ def main():
             else:
                 log("Falha ao configurar o datasource do Tomcat.", "ERROR")
             input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
+        
+        elif option == "12":
+            log("[12] Teste E2E: validar build, deploy (Tomcat frio, WildFly quente), DB e logins", "INFO")
+            # 1) Banco de dados
+            if not ensure_docker_db_up():
+                log("Banco de dados indisponível. Abortando.", "ERROR")
+                if not NON_INTERACTIVE:
+                    input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
+                continue
+            ok_db, db_msg = check_database_connection()
+            if not ok_db:
+                log(f"Sem conexão com o banco: {db_msg}", "ERROR")
+                if not NON_INTERACTIVE:
+                    input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
+                continue
+
+            # 2) Garantir usuário ADMIN para testes (idempotente)
+            try:
+                seeded = ensure_admin_seed()
+                if seeded:
+                    log("Seed de usuário ADMIN verificado/criado.", "INFO")
+                else:
+                    log("Seed de ADMIN não aplicado (pode já existir ou psycopg2 indisponível).", "WARNING")
+            except Exception as e:
+                log(f"Erro ao tentar semear usuário ADMIN: {e}", "WARNING")
+
+            # 3) Build do WAR se necessário
+            war_path = find_built_war()
+            if not war_path:
+                log("WAR não encontrado em target/. Gerando artefatos com Maven (profile tomcat)...", "INFO")
+                mvn_res = execute_maven_command("clean package", profile="tomcat", additional_params="-DskipTests")
+                if not mvn_res.get("success"):
+                    log("Falha ao gerar WAR para Tomcat.", "ERROR")
+                    if not NON_INTERACTIVE:
+                        input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
+                    continue
+                war_path = find_built_war()
+                if not war_path:
+                    log("Ainda não achei o WAR após o build.", "ERROR")
+                    if not NON_INTERACTIVE:
+                        input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
+                    continue
+
+            # 4) Deploy Tomcat (frio)
+            log("Realizando cold deploy no Tomcat...", "INFO")
+            if not deploy_tomcat_root_quick(war_path):
+                log("Deploy no Tomcat falhou.", "ERROR")
+            else:
+                # Validar artefatos
+                tomcat_root_war = os.path.join(TOMCAT_DIR, "webapps", "ROOT.war")
+                if os.path.exists(tomcat_root_war):
+                    log("Tomcat: ROOT.war presente em webapps/", "SUCCESS")
+                else:
+                    log("Tomcat: ROOT.war não encontrado após deploy.", "WARNING")
+                # Aguardar ROOT responder e também a página de login
+                wait_for_url(f"http://localhost:{TOMCAT_PORT}/", timeout=60)
+                wait_for_url(f"http://localhost:{TOMCAT_PORT}/login", timeout=60)
+
+            # 5) Deploy WildFly (quente)
+            log("Realizando hot deploy no WildFly...", "INFO")
+            if not deploy_wildfly_root_quick(war_path):
+                log("Deploy no WildFly pode não ter sido aplicado.", "WARNING")
+            else:
+                deployments = os.path.join(WILDFLY_DIR, "standalone", "deployments")
+                if os.path.exists(os.path.join(deployments, "ROOT.war")):
+                    log("WildFly: ROOT.war presente em standalone/deployments/", "SUCCESS")
+                else:
+                    log("WildFly: ROOT.war não encontrado em deployments.", "WARNING")
+                wait_for_url(f"http://localhost:{WILDFLY_PORT}/", timeout=60)
+                wait_for_url(f"http://localhost:{WILDFLY_PORT}/login", timeout=60)
+
+            # 6) Testes de login
+            def try_logins_for(base: str) -> bool:
+                # Com deploy como ROOT, priorizamos testar apenas o contexto raiz
+                ok_root = test_login(base)
+                return ok_root
+
+            tested_any = False
+            if is_server_up("localhost", TOMCAT_PORT):
+                base = f"http://localhost:{TOMCAT_PORT}/"
+                log(f"Tomcat aparentemente disponível em {base}. Testando login (browser)...", "INFO")
+                ok_browser = test_login_browser(base)
+                if not ok_browser:
+                    log("Tentando fallback HTTP para Tomcat...", "WARNING")
+                    if try_logins_for(base):
+                        log("Login no Tomcat validado via HTTP (ROOT ou /meu-projeto-java/).", "SUCCESS")
+                    else:
+                        log("Falha ao validar login no Tomcat (browser e HTTP).", "ERROR")
+                else:
+                    log("Login no Tomcat validado via navegador.", "SUCCESS")
+                tested_any = True
+            else:
+                log("Tomcat não está em execução.", "WARNING")
+
+            if is_server_up("localhost", WILDFLY_PORT):
+                base = f"http://localhost:{WILDFLY_PORT}/"
+                log(f"WildFly aparentemente disponível em {base}. Testando login (browser)...", "INFO")
+                # Preferir teste via navegador para WildFly
+                ok_browser = test_login_browser(base)
+                if not ok_browser:
+                    # fallback HTTP simples
+                    log("Tentando fallback HTTP para WildFly...", "WARNING")
+                    ok_http = try_logins_for(base)
+                    if ok_http:
+                        log("Login no WildFly validado via HTTP.", "SUCCESS")
+                    else:
+                        log("Falha ao validar login no WildFly (browser e HTTP).", "ERROR")
+                else:
+                    log("Login no WildFly validado via navegador.", "SUCCESS")
+                tested_any = True
+            else:
+                log("WildFly não está em execução.", "WARNING")
+
+            if not tested_any:
+                log("Nenhum servidor disponível (Tomcat 9090 / WildFly 8080).", "WARNING")
+            if not NON_INTERACTIVE:
+                input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
             
         elif option == "0":
             exit_menu = True
@@ -3719,7 +4491,7 @@ def main():
             log("Encerrando script...", "INFO")
         
         else:
-            log(f"Opção inválida: {option}. Escolha uma opção de 0 a 8.", "WARNING")
+            log(f"Opção inválida: {option}. Escolha uma opção de 0 a 12.", "WARNING")
             input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
 
 if __name__ == "__main__":
