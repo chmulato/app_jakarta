@@ -130,6 +130,7 @@ except ModuleNotFoundError:
     sys.exit(1)
 import zipfile
 import re
+import json
 import argparse
 from datetime import datetime
 from pathlib import Path
@@ -537,6 +538,113 @@ def deploy_tomcat_root_quick(war_path: str) -> bool:
         log(f"Falha ao iniciar Tomcat: {e}", "ERROR")
         return False
 
+def derive_context_from_war(war_path: str) -> str:
+    """Deriva o context path a partir do WAR.
+    Preferência: WEB-INF/jboss-web.xml <context-root>, senão basename do WAR.
+    Retorna com prefixo '/'.
+    """
+    try:
+        import zipfile
+        import xml.etree.ElementTree as ET
+        with zipfile.ZipFile(war_path, 'r') as zf:
+            # 1) Método portátil preferido (Tomcat/WildFly): META-INF/context.xml
+            for name in ("META-INF/context.xml",):
+                if name in zf.namelist():
+                    with zf.open(name) as f:
+                        data = f.read()
+                        try:
+                            root = ET.fromstring(data)
+                            if root.tag.endswith('Context'):
+                                path_attr = root.get('path') or root.get('{http://xmlns.jcp.org/xml/ns/javaee}path')
+                                if path_attr:
+                                    ctx = path_attr.strip()
+                                    if not ctx:
+                                        break
+                                    if not ctx.startswith('/'):
+                                        ctx = '/' + ctx
+                                    return ctx
+                        except Exception:
+                            pass
+            # 2) WildFly/JBoss: WEB-INF/jboss-web.xml
+            for name in ("WEB-INF/jboss-web.xml",):
+                if name in zf.namelist():
+                    with zf.open(name) as f:
+                        data = f.read()
+                        try:
+                            root = ET.fromstring(data)
+                            # suporta namespace do jboss-web
+                            ctx_el = None
+                            for el in root.iter():
+                                if el.tag.endswith('context-root'):
+                                    ctx_el = el
+                                    break
+                            if ctx_el is not None and ctx_el.text:
+                                ctx = ctx_el.text.strip()
+                                if not ctx.startswith('/'):
+                                    ctx = '/' + ctx
+                                return ctx
+                        except Exception:
+                            pass
+    except Exception:
+        pass
+    # fallback para nome do arquivo
+    base = os.path.basename(war_path)
+    if base.lower().endswith('.war'):
+        base = base[:-4]
+    if base.upper() == 'ROOT' or base == '':
+        return '/'
+    return '/' + base
+
+def deploy_tomcat_war_quick(war_path: str) -> bool:
+    """Cold deploy no Tomcat mantendo o nome do WAR (contexto pelo nome/descriptor)."""
+    if not os.path.exists(TOMCAT_DIR):
+        log(f"Tomcat não encontrado em: {TOMCAT_DIR}", "ERROR")
+        return False
+    # Parar se estiver rodando
+    if is_server_up("localhost", TOMCAT_PORT):
+        log("Tomcat em execução: realizando parada para cold deploy...", "INFO")
+        stop_tomcat_server()
+        time.sleep(3)
+    try:
+        configure_tomcat_port(TOMCAT_DIR, TOMCAT_PORT)
+    except Exception:
+        pass
+    webapps = os.path.join(TOMCAT_DIR, "webapps")
+    os.makedirs(webapps, exist_ok=True)
+    war_name = os.path.basename(war_path)
+    ctx = derive_context_from_war(war_path).lstrip('/') or 'ROOT'
+    # Limpeza de artefatos anteriores
+    log(f"Tomcat: limpando webapps/{ctx} e {war_name} antes do deploy...", "INFO")
+    for item in (ctx, war_name):
+        p = os.path.join(webapps, item)
+        try:
+            if os.path.isdir(p):
+                shutil.rmtree(p, ignore_errors=True)
+            elif os.path.isfile(p):
+                os.remove(p)
+        except Exception:
+            pass
+    try:
+        shutil.copy2(war_path, os.path.join(webapps, war_name))
+        log(f"WAR copiado para Tomcat como {war_name}", "SUCCESS")
+    except Exception as e:
+        log(f"Falha ao copiar WAR para Tomcat: {e}", "ERROR")
+        return False
+    # Iniciar
+    try:
+        env = setup_tomcat_environment(TOMCAT_DIR)
+        bin_dir = os.path.join(TOMCAT_DIR, "bin")
+        if platform.system() == "Windows":
+            subprocess.Popen([os.path.join(bin_dir, "startup.bat")], shell=True, env=env)
+        else:
+            subprocess.Popen([os.path.join(bin_dir, "startup.sh")], env=env)
+        if not wait_for_port(TOMCAT_PORT, timeout=40):
+            log("Tomcat não respondeu na porta esperada após iniciar.", "WARNING")
+        return True
+    except Exception as e:
+        log(f"Falha ao iniciar Tomcat: {e}", "ERROR")
+        return False
+
 def deploy_wildfly_root_quick(war_path: str) -> bool:
     """Faz hot deploy no WildFly: inicia se necessário e copia WAR como ROOT.war para deployments."""
     if not os.path.exists(WILDFLY_DIR):
@@ -578,6 +686,58 @@ def deploy_wildfly_root_quick(war_path: str) -> bool:
     except Exception as e:
         log(f"Falha ao copiar WAR para WildFly: {e}", "ERROR")
         return False
+
+def deploy_wildfly_war_quick(war_path: str) -> bool:
+    """Hot deploy no WildFly mantendo o nome do WAR (contexto pelo nome/descriptor)."""
+    if not os.path.exists(WILDFLY_DIR):
+        log(f"WildFly não encontrado em: {WILDFLY_DIR}", "ERROR")
+        return False
+    # Iniciar se necessário
+    if not is_server_up("localhost", WILDFLY_PORT):
+        log("WildFly não detectado; iniciando...", "INFO")
+        try:
+            env = setup_wildfly_environment()
+            bin_dir = os.path.join(WILDFLY_DIR, "bin")
+            if platform.system() == "Windows":
+                subprocess.Popen([os.path.join(bin_dir, "standalone.bat")], shell=True, env=env)
+            else:
+                subprocess.Popen([os.path.join(bin_dir, "standalone.sh")], env=env)
+        except Exception as e:
+            log(f"Falha ao iniciar WildFly: {e}", "ERROR")
+            return False
+        wait_for_port(WILDFLY_PORT, timeout=40)
+    # Copiar WAR
+    deployments = os.path.join(WILDFLY_DIR, "standalone", "deployments")
+    os.makedirs(deployments, exist_ok=True)
+    war_name = os.path.basename(war_path)
+    # Limpar marcadores anteriores desse WAR
+    for item in (war_name, war_name + ".deployed", war_name + ".failed", war_name + ".undeployed", war_name + ".isdeploying"):
+        p = os.path.join(deployments, item)
+        try:
+            if os.path.isfile(p):
+                os.remove(p)
+        except Exception:
+            pass
+    try:
+        dest = os.path.join(deployments, war_name)
+        shutil.copy2(war_path, dest)
+        log(f"WAR copiado para WildFly como {war_name} (hot deploy)", "SUCCESS")
+        try:
+            open(dest + ".dodeploy", "w").close()
+        except Exception:
+            pass
+    except Exception as e:
+        log(f"Falha ao copiar WAR para WildFly: {e}", "ERROR")
+        return False
+    # Aguardar marker .deployed do WAR específico
+    start = time.time()
+    deployed_marker = os.path.join(deployments, war_name + ".deployed")
+    while time.time() - start < 45:
+        if os.path.exists(deployed_marker):
+            return True
+        time.sleep(1.5)
+    log(f"WildFly: não confirmou deployment de {war_name} dentro do tempo.", "WARNING")
+    return False
     # Aguardar marker .deployed ou sucesso de URL
     deployed_marker = os.path.join(deployments, "ROOT.war.deployed")
     start = time.time()
@@ -590,15 +750,38 @@ def deploy_wildfly_root_quick(war_path: str) -> bool:
     log("WildFly: não confirmou deployment do ROOT.war dentro do tempo.", "WARNING")
     return False
 
+def detect_wildfly_context_paths() -> list[str]:
+    """Detecta possíveis context paths publicados no WildFly baseado nos artefatos em deployments.
+    Retorna uma lista ordenada de contextos como '/', '/meu-projeto-java', etc.
+    """
+    contexts: list[str] = []
+    try:
+        deployments = os.path.join(WILDFLY_DIR, "standalone", "deployments")
+        if not os.path.isdir(deployments):
+            return contexts
+        files = set(os.listdir(deployments))
+        # Se ROOT.war.deployed existe, raiz é '/'
+        if "ROOT.war.deployed" in files or "ROOT.war" in files:
+            contexts.append("/")
+        # Demais .war implantados
+        war_names = [f for f in files if f.lower().endswith(".war")]
+        # Priorizar 'meu-projeto-java.war' se existir
+        war_names_sorted = sorted(war_names, key=lambda n: (0 if n.startswith("meu-projeto-java") else 1, n.lower()))
+        for war in war_names_sorted:
+            base = war[:-4]
+            if base.upper() == "ROOT":
+                continue
+            ctx = "/" + base
+            if ctx not in contexts:
+                contexts.append(ctx)
+        return contexts
+    except Exception:
+        return contexts
+
 def _candidate_login_urls(base_url: str) -> list[str]:
-    # Tentar primeiro raiz /login e depois contexto /meu-projeto-java/login
-    paths = ["login", "meu-projeto-java/login"]
-    result = []
-    for p in paths:
-        u = urljoin(base_url, p)
-        if u not in result:
-            result.append(u)
-    return result
+    # Base URL já deve conter o contexto da aplicação (se houver)
+    # Portanto, basta testar apenas "login" relativo a essa base
+    return [urljoin(base_url, "login")]
 
 
 def test_login(base_url: str, email: str = "admin@meuapp.com", senha: str = "Admin@123", timeout: int = 20, max_wait: int = 60) -> bool:
@@ -2046,6 +2229,258 @@ def configure_tomcat_postgres_datasource():
     except Exception as e:
         log(f"Erro ao configurar datasource do Tomcat: {e}", "ERROR")
         return False
+
+def _tail_file(path: str, max_bytes: int = 64_000) -> str:
+    """Lê as últimas bytes de um arquivo para inspeção rápida."""
+    try:
+        with open(path, 'rb') as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            if size <= max_bytes:
+                f.seek(0)
+                return f.read().decode('utf-8', errors='ignore')
+            f.seek(-max_bytes, os.SEEK_END)
+            return f.read().decode('utf-8', errors='ignore')
+    except Exception:
+        return ""
+
+def validate_tomcat_jndi(runtime_check: bool = True) -> tuple[bool, str]:
+    """Valida configuração JNDI no Tomcat.
+    - Checa conf/context.xml por Resource jdbc/PostgresDS
+    - Checa presença do driver PostgreSQL em TOMCAT_DIR/lib
+    - Opcional: se servidor estiver rodando, faz inspeção de logs (catalina*) em busca de erros/sucessos
+    Retorna (ok, mensagem_resumo)
+    """
+    try:
+        context_xml = os.path.join(TOMCAT_DIR, 'conf', 'context.xml')
+        if not os.path.exists(context_xml):
+            return False, f"context.xml não encontrado em {context_xml}"
+        import xml.etree.ElementTree as ET
+        tree = ET.parse(context_xml)
+        root = tree.getroot()
+        # procurar qualquer elemento <Resource ... name="jdbc/PostgresDS">
+        resource = None
+        for el in root.iter():
+            if el.tag.endswith('Resource') and (el.get('name') == 'jdbc/PostgresDS' or el.get('name') == 'java:comp/env/jdbc/PostgresDS'):
+                resource = el
+                break
+        if not resource:
+            return False, "Resource jdbc/PostgresDS não encontrado em conf/context.xml"
+        # validações básicas
+        typ = (resource.get('type') or '').lower()
+        url = resource.get('url') or ''
+        username = resource.get('username') or ''
+        factory = resource.get('factory') or ''
+        cfg_ok = ('javax.sql.datasource' in typ) and ('jdbc:postgresql' in url.lower()) and bool(username) and bool(factory)
+        # driver jar
+        lib_dir = os.path.join(TOMCAT_DIR, 'lib')
+        has_pg_driver = False
+        try:
+            if os.path.isdir(lib_dir):
+                has_pg_driver = any(n.lower().startswith('postgresql-') and n.lower().endswith('.jar') for n in os.listdir(lib_dir))
+        except Exception:
+            pass
+        msg = []
+        msg.append("Resource em context.xml OK" if cfg_ok else "Resource em context.xml incompleto")
+        msg.append("Driver postgresql presente em lib/" if has_pg_driver else "Driver postgresql NÃO encontrado em lib/")
+        ok = cfg_ok and has_pg_driver
+        # runtime logs
+        if runtime_check and is_server_up('localhost', TOMCAT_PORT):
+            logs_dir = os.path.join(TOMCAT_DIR, 'logs')
+            if os.path.isdir(logs_dir):
+                # pegar o arquivo catalina mais recente
+                cand = [p for p in os.listdir(logs_dir) if p.lower().startswith('catalina')]
+                cand_paths = [os.path.join(logs_dir, p) for p in cand]
+                latest = max(cand_paths, key=lambda p: os.path.getmtime(p), default=None)
+                if latest:
+                    tail = _tail_file(latest)
+                    # Heurísticas de sucesso/erro
+                    err_signals = [
+                        'cannot create jdbc driver',
+                        'cannot create poolableconnectionfactory',
+                        'resource is not available',
+                        'failed to register in jndi',
+                        'nontransientconnectionexception',
+                        'org.postgresql.util',
+                        'name [jdbc/postgresds] is not bound',
+                        'name [java:comp/env/jdbc/postgresds] is not bound',
+                        'no suitable driver',
+                        'org.postgresql.driver not found',
+                        'fetal: password authentication failed',
+                        'connection refused',
+                    ]
+                    ok_signals = [
+                        'registering jndi resource',
+                        'registered jndi resource',
+                        'initialized datasource',
+                        'pgjdbc',
+                        'bound to naming context',
+                        'name [java:comp/env/jdbc/postgresds] is bound',
+                        'name [jdbc/postgresds] is bound',
+                        'org.apache.commons.dbcp2',
+                    ]
+                    tail_low = tail.lower()
+                    has_err = any(tok in tail_low for tok in err_signals)
+                    has_ok = any(tok in tail_low for tok in ok_signals)
+                    if has_err:
+                        ok = False
+                        msg.append("Erros detectados em catalina.log referentes ao datasource/JNDI")
+                    elif has_ok:
+                        msg.append("Logs indicam datasource inicializado/bound")
+        return ok, '; '.join(msg)
+    except Exception as e:
+        return False, f"Falha na validação JNDI do Tomcat: {e}"
+
+def _wildfly_read_server_log_tail(max_bytes: int = 96_000) -> str:
+    path = os.path.join(WILDFLY_DIR, 'standalone', 'log', 'server.log')
+    return _tail_file(path, max_bytes) if os.path.exists(path) else ""
+
+def validate_wildfly_jndi(runtime_check: bool = True) -> tuple[bool, str]:
+    """Valida configuração JNDI no WildFly.
+    - Checa standalone.xml por datasource com jndi-name java:/jdbc/PostgresDS
+    - Checa módulo do driver PostgreSQL
+    - Opcional: se servidor estiver rodando, tenta jboss-cli test-connection e/ou inspeciona server.log
+    Retorna (ok, mensagem_resumo)
+    """
+    try:
+        standalone_xml = os.path.join(WILDFLY_DIR, 'standalone', 'configuration', 'standalone.xml')
+        if not os.path.exists(standalone_xml):
+            return False, f"standalone.xml não encontrado em {standalone_xml}"
+        import xml.etree.ElementTree as ET
+        tree = ET.parse(standalone_xml)
+        root = tree.getroot()
+        def localname(tag: str) -> str:
+            return tag.split('}', 1)[1] if tag.startswith('{') else tag
+        ds_subsystem = None
+        for el in root.iter():
+            if localname(el.tag) == 'subsystem' and el.tag.startswith('{') and 'datasources' in el.tag:
+                ds_subsystem = el
+                break
+        if ds_subsystem is None:
+            return False, 'SubSystem datasources não encontrado no standalone.xml'
+        datasources_node = None
+        for ch in ds_subsystem:
+            if localname(ch.tag) == 'datasources':
+                datasources_node = ch
+                break
+        if datasources_node is None:
+            return False, 'Nó <datasources> não encontrado no standalone.xml'
+        # procurar datasource com jndi-name java:/jdbc/PostgresDS
+        jndi_name = 'java:/jdbc/PostgresDS'
+        target = None
+        for n in datasources_node:
+            if localname(n.tag) == 'datasource' and (n.get('jndi-name') == jndi_name or n.get('pool-name') == 'PostgresDS'):
+                target = n; break
+        if target is None:
+            return False, "Datasource PostgresDS não encontrado em standalone.xml"
+        # Checar módulo do driver
+        module_dir = os.path.join(WILDFLY_DIR, 'modules', 'system', 'layers', 'base', 'org', 'postgresql', 'main')
+        jar_ok = os.path.exists(os.path.join(module_dir, 'postgresql-42.7.4.jar'))
+        mod_ok = os.path.exists(os.path.join(module_dir, 'module.xml'))
+        ok = jar_ok and mod_ok
+        msg_parts = ["Driver módulo OK" if ok else "Driver módulo ausente/incompleto"]
+        # runtime
+        if runtime_check and (is_server_up('localhost', WILDFLY_PORT) or is_server_up('localhost', WILDFLY_MANAGEMENT_PORT)):
+            # 1) tentar CLI test-connection (pode requerer usuário de gestão)
+            cli_path = os.path.join(WILDFLY_DIR, 'bin', 'jboss-cli.bat' if platform.system() == 'Windows' else 'jboss-cli.sh')
+            cli_ok = False
+            cli_msg = None
+            if os.path.exists(cli_path):
+                try:
+                    cmd = [cli_path, '--connect', '--commands=/subsystem=datasources/data-source=PostgresDS:test-connection-in-pool']
+                    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=15, shell=(platform.system()=="Windows"))
+                    out = (proc.stdout or '') + '\n' + (proc.stderr or '')
+                    out_low = out.lower()
+                    if 'outcome' in out_low and 'success' in out_low:
+                        cli_ok = True
+                        cli_msg = 'CLI test-connection-in-pool OK'
+                    else:
+                        cli_msg = f'CLI não confirmou sucesso: {out.strip()[:200]}'
+                except Exception as e:
+                    cli_msg = f'CLI indisponível/erro: {e}'
+            if cli_msg:
+                msg_parts.append(cli_msg)
+            ok = ok and cli_ok if cli_ok else ok
+            # 2) inspecionar server.log
+            tail = _wildfly_read_server_log_tail()
+            if tail:
+                low = tail.lower()
+                # Sucesso típicos
+                success_tokens = [
+                    'wflyjca0005',  # Bound data source
+                    'bound data source',
+                    'java:/jdbc/postgresds" =>',
+                ]
+                error_tokens = [
+                    'wflyjca0046',  # failed to load driver
+                    'wflyjca0040',
+                    'wflyjca0056',
+                    'wflyjca0091',  # connection error
+                    'failed to register',
+                    'jboss.naming',
+                    'could not create connection',
+                ]
+                has_ok = any(tok in low for tok in success_tokens) or ('java:/jdbc/postgresds' in low and 'bound' in low)
+                has_err = any(tok in low for tok in error_tokens)
+                if has_ok:
+                    msg_parts.append('Logs indicam JNDI bound (datasource registrado)')
+                if has_err:
+                    ok = False
+                    msg_parts.append('Logs indicam falha JCA ou registro de datasource')
+        return ok, '; '.join(msg_parts)
+    except Exception as e:
+        return False, f"Falha na validação JNDI do WildFly: {e}"
+
+def validate_jndi_http(base_url: str, timeout: int = 8) -> tuple[bool, str]:
+    """Valida JNDI via uma URL HTTP de status da aplicação, se disponível.
+    - Se a env APP_JNDI_STATUS_URL estiver definida (absoluta ou relativa), usa como principal.
+    - Caso contrário, tenta caminhos comuns: status/jndi, health/jndi, actuator/health/db, health, status.
+    Interpreta JSON (status=UP/OK) ou texto contendo 'OK'/'UP' e referência a Postgres/PostgresDS.
+    """
+    try:
+        candidates: list[str] = []
+        env_url = os.environ.get('APP_JNDI_STATUS_URL', '').strip()
+        if env_url:
+            if env_url.lower().startswith('http://') or env_url.lower().startswith('https://'):
+                candidates.append(env_url)
+            else:
+                candidates.append(urljoin(base_url, env_url))
+        candidates.extend([
+            urljoin(base_url, 'status/jndi'),
+            urljoin(base_url, 'health/jndi'),
+            urljoin(base_url, 'actuator/health/db'),
+            urljoin(base_url, 'health'),
+            urljoin(base_url, 'status'),
+        ])
+        seen: set[str] = set()
+        for url in candidates:
+            if url in seen:
+                continue
+            seen.add(url)
+            try:
+                r = requests.get(url, timeout=timeout)
+            except Exception:
+                continue
+            if r.status_code >= 400:
+                continue
+            txt = (r.text or '').strip()
+            # tentar JSON
+            parsed = None
+            try:
+                parsed = r.json()
+            except Exception:
+                parsed = None
+            if isinstance(parsed, dict):
+                low = json.dumps(parsed).lower()
+                if ('status' in parsed and str(parsed.get('status')).upper() in ('UP','OK')) or ('db' in low and ('up' in low or 'ok' in low)):
+                    return True, f"HTTP OK em {url} (JSON)"
+            # texto simples
+            low = txt.lower()
+            if ('ok' in low or 'up' in low) and ('postgres' in low or 'postgresds' in low or 'jndi' in low or 'datasource' in low):
+                return True, f"HTTP OK em {url} (texto)"
+        return False, 'Nenhuma URL de status confirmou JNDI'
+    except Exception as e:
+        return False, f"Falha na validação HTTP de JNDI: {e}"
 def check_wildfly_environment():
     """
     Verifica o ambiente do WildFly e fornece informações de diagnóstico.
@@ -4416,6 +4851,10 @@ def main():
                 else:
                     subprocess.Popen([os.path.join(WILDFLY_DIR, "bin", "standalone.sh")], shell=True)
                 log("WildFly reiniciado (inicialização em background).", "INFO")
+                # Validação JNDI
+                time.sleep(5)
+                ok_jndi, msg = validate_wildfly_jndi(runtime_check=True)
+                log(f"Validação JNDI WildFly: {msg}", "SUCCESS" if ok_jndi else "WARNING")
             else:
                 log("Falha ao configurar o datasource do WildFly.", "ERROR")
             input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
@@ -4432,6 +4871,9 @@ def main():
                 log("Reiniciando Tomcat para aplicar alterações do datasource...", "INFO")
                 if restart_tomcat_server():
                     log("Tomcat reiniciado para aplicar datasource.", "SUCCESS")
+                    # Validação JNDI
+                    ok_jndi, msg = validate_tomcat_jndi(runtime_check=True)
+                    log(f"Validação JNDI Tomcat: {msg}", "SUCCESS" if ok_jndi else "WARNING")
                 else:
                     log("Falha ao reiniciar o Tomcat.", "ERROR")
             else:
@@ -4481,35 +4923,115 @@ def main():
                     input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
                 continue
 
-            # 4) Deploy Tomcat (frio)
-            log("Realizando cold deploy no Tomcat...", "INFO")
-            if not deploy_tomcat_root_quick(war_path):
+            # 4) Configurar DS do Tomcat e fazer deploy (frio)
+            log("Verificando/Configurando datasource PostgreSQL no Tomcat antes do deploy...", "INFO")
+            if not configure_tomcat_postgres_datasource():
+                log("Não foi possível garantir o datasource PostgreSQL no Tomcat. Prosseguindo assim mesmo...", "WARNING")
+            else:
+                ok_jndi_t, msg_t = validate_tomcat_jndi(runtime_check=False)
+                log(f"Pré-validação JNDI Tomcat (estática): {msg_t}", "SUCCESS" if ok_jndi_t else "WARNING")
+            # Descobrir contexto pelo artefato
+            app_ctx = derive_context_from_war(war_path)
+            war_name = os.path.basename(war_path)
+            log(f"Contexto derivado do WAR ({war_name}): {app_ctx}", "INFO")
+            log("Realizando cold deploy no Tomcat mantendo o nome do WAR...", "INFO")
+            if not deploy_tomcat_war_quick(war_path):
                 log("Deploy no Tomcat falhou.", "ERROR")
             else:
                 # Validar artefatos
-                tomcat_root_war = os.path.join(TOMCAT_DIR, "webapps", "ROOT.war")
-                if os.path.exists(tomcat_root_war):
-                    log("Tomcat: ROOT.war presente em webapps/", "SUCCESS")
+                tomcat_target = os.path.join(TOMCAT_DIR, "webapps", war_name)
+                if os.path.exists(tomcat_target):
+                    log(f"Tomcat: {war_name} presente em webapps/", "SUCCESS")
                 else:
-                    log("Tomcat: ROOT.war não encontrado após deploy.", "WARNING")
-                # Aguardar ROOT responder e também a página de login
-                wait_for_url(f"http://localhost:{TOMCAT_PORT}/", timeout=60)
-                wait_for_url(f"http://localhost:{TOMCAT_PORT}/login", timeout=60)
+                    log(f"Tomcat: {war_name} não encontrado após deploy.", "WARNING")
+                # Aguardar o contexto responder e também a página de login
+                base_tom = f"http://localhost:{TOMCAT_PORT}{'' if app_ctx == '/' else app_ctx}/"
+                wait_for_url(base_tom, timeout=60)
+                wait_for_url(urljoin(base_tom, "login"), timeout=60)
+                # Validação JNDI em runtime após subir Tomcat
+                ok_jndi_rt, msg_rt = validate_tomcat_jndi(runtime_check=True)
+                log(f"Validação JNDI Tomcat (runtime): {msg_rt}", "SUCCESS" if ok_jndi_rt else "WARNING")
+                # Validação HTTP opcional de JNDI/DB
+                ok_http_jndi, msg_http_jndi = validate_jndi_http(base_tom)
+                log(f"Validação HTTP JNDI Tomcat: {msg_http_jndi}", "SUCCESS" if ok_http_jndi else "WARNING")
 
-            # 5) Deploy WildFly (quente)
-            log("Realizando hot deploy no WildFly...", "INFO")
-            if not deploy_wildfly_root_quick(war_path):
+            # 5) Configurar DS do WildFly antes do deploy e garantir aplicação da config
+            log("Verificando/Configurando datasource PostgreSQL no WildFly antes do deploy...", "INFO")
+            ds_ok = configure_wildfly_postgres_datasource()
+            if ds_ok:
+                log("Datasource PostgreSQL configurado no WildFly.", "SUCCESS")
+                # Para garantir que o WildFly re-leia standalone.xml e módulos, parar caso esteja rodando
+                if is_server_up("localhost", WILDFLY_PORT) or is_server_up("localhost", WILDFLY_MANAGEMENT_PORT):
+                    log("Reiniciando WildFly para aplicar alterações de datasource...", "INFO")
+                    try:
+                        stop_wildfly_server()
+                        time.sleep(3)
+                    except Exception:
+                        pass
+            else:
+                log("Não foi possível configurar o datasource do WildFly; o deploy pode falhar.", "WARNING")
+
+            # 6) Deploy WildFly (quente)
+            log("Realizando hot deploy no WildFly mantendo o nome do WAR...", "INFO")
+            if not deploy_wildfly_war_quick(war_path):
                 log("Deploy no WildFly pode não ter sido aplicado.", "WARNING")
             else:
                 deployments = os.path.join(WILDFLY_DIR, "standalone", "deployments")
-                if os.path.exists(os.path.join(deployments, "ROOT.war")):
-                    log("WildFly: ROOT.war presente em standalone/deployments/", "SUCCESS")
+                if os.path.exists(os.path.join(deployments, war_name)):
+                    log(f"WildFly: {war_name} presente em standalone/deployments/", "SUCCESS")
                 else:
-                    log("WildFly: ROOT.war não encontrado em deployments.", "WARNING")
-                wait_for_url(f"http://localhost:{WILDFLY_PORT}/", timeout=60)
-                wait_for_url(f"http://localhost:{WILDFLY_PORT}/login", timeout=60)
+                    log(f"WildFly: {war_name} não encontrado em deployments.", "WARNING")
+                # Evitar depender da raiz (pode mostrar Welcome to WildFly). Aguardar especificamente <context>/login
+                base_wf = f"http://localhost:{WILDFLY_PORT}{'' if app_ctx == '/' else app_ctx}/"
+                wait_for_url(urljoin(base_wf, "login"), timeout=30)
+                # Validação JNDI no WildFly
+                ok_jndi_wf, msg_wf = validate_wildfly_jndi(runtime_check=True)
+                log(f"Validação JNDI WildFly: {msg_wf}", "SUCCESS" if ok_jndi_wf else "WARNING")
+                # Validação HTTP opcional de JNDI/DB
+                ok_http_jndi_wf, msg_http_jndi_wf = validate_jndi_http(base_wf)
+                log(f"Validação HTTP JNDI WildFly: {msg_http_jndi_wf}", "SUCCESS" if ok_http_jndi_wf else "WARNING")
 
-            # 6) Testes de login
+                # Validação adicional: checar via navegador se a URL de login abre no WildFly
+                try:
+                    from playwright.sync_api import sync_playwright
+                    base_wf = f"http://localhost:{WILDFLY_PORT}{'' if app_ctx == '/' else app_ctx}/"
+                    with sync_playwright() as p:
+                        browser = p.chromium.launch(headless=True)
+                        context = browser.new_context()
+                        page = context.new_page()
+                        page.set_default_timeout(10000)
+                        # Construir caminhos candidatos de acordo com contextos detectados
+                        candidate_paths: list[str] = ["login"]
+                        ok_nav = False
+                        ok_url = None
+                        for path in candidate_paths:
+                            target_url = urljoin(base_wf, path)
+                            try:
+                                page.goto(target_url)
+                                # Considerar sucesso se existem inputs típicos do form
+                                page.wait_for_selector("input[name='email'], #email, input[type='email']", timeout=5000)
+                                page.wait_for_selector("input[name='senha'], #senha, input[type='password']", timeout=5000)
+                                ok_nav = True
+                                ok_url = target_url
+                                break
+                            except Exception:
+                                try:
+                                    content = page.content().lower()
+                                    if "login" in content and ("email" in content or "senha" in content or "password" in content):
+                                        ok_nav = True
+                                        ok_url = target_url
+                                        break
+                                except Exception:
+                                    pass
+                        context.close(); browser.close()
+                        if ok_nav and ok_url:
+                            log(f"WildFly: validação via navegador OK para URL {ok_url}.", "SUCCESS")
+                        else:
+                            log("WildFly: navegador não validou as URLs de login testadas (/login e /meu-projeto-java/login).", "WARNING")
+                except Exception as _e:
+                    log(f"WildFly: não foi possível validar via navegador a URL /login: {_e}", "WARNING")
+
+            # 7) Testes de login
             def try_logins_for(base: str) -> bool:
                 # Com deploy como ROOT, priorizamos testar apenas o contexto raiz
                 ok_root = test_login(base)
@@ -4517,7 +5039,7 @@ def main():
 
             tested_any = False
             if is_server_up("localhost", TOMCAT_PORT):
-                base = f"http://localhost:{TOMCAT_PORT}/"
+                base = f"http://localhost:{TOMCAT_PORT}{'' if app_ctx == '/' else app_ctx}/"
                 log(f"Tomcat aparentemente disponível em {base}. Testando login (browser)...", "INFO")
                 ok_browser = test_login_browser(base)
                 if not ok_browser:
@@ -4533,15 +5055,30 @@ def main():
                 log("Tomcat não está em execução.", "WARNING")
 
             if is_server_up("localhost", WILDFLY_PORT):
-                base = f"http://localhost:{WILDFLY_PORT}/"
+                base = f"http://localhost:{WILDFLY_PORT}{'' if app_ctx == '/' else app_ctx}/"
                 # Validar deploy/endpoint antes do teste de navegação
                 wf_deployments = os.path.join(WILDFLY_DIR, "standalone", "deployments")
-                marker_deployed = os.path.join(wf_deployments, "ROOT.war.deployed")
+                marker_deployed = os.path.join(wf_deployments, war_name + ".deployed")
+                marker_failed = os.path.join(wf_deployments, war_name + ".failed")
+                has_failed = os.path.exists(marker_failed)
                 has_marker = os.path.exists(marker_deployed)
                 login_ready = wait_for_url(urljoin(base, "login"), timeout=20)
                 wildfly_ready = has_marker or login_ready
+                if has_failed:
+                    wildfly_ready = False
+                    log(f"WildFly: marker {war_name}.failed encontrado — deploy falhou.", "ERROR")
+                    # Tentar ler o conteúdo do failed para diagnosticar
+                    try:
+                        with open(marker_failed, 'r', encoding='utf-8', errors='ignore') as f:
+                            failed_reason = f.read().strip()
+                        if failed_reason:
+                            # Logar somente um trecho para evitar poluir muito
+                            snippet = failed_reason[:500].replace('\n', ' ').replace('\r', ' ')
+                            log(f"Conteúdo de {war_name}.failed: {snippet}", "ERROR")
+                    except Exception as e:
+                        log(f"Não foi possível ler ROOT.war.failed: {e}", "WARNING")
                 if not has_marker:
-                    log("WildFly: marker ROOT.war.deployed não encontrado.", "WARNING")
+                    log(f"WildFly: marker {war_name}.deployed não encontrado.", "WARNING")
                 if not login_ready:
                     log("WildFly: /login não respondeu com 2xx/3xx dentro do tempo.", "WARNING")
                 if not wildfly_ready:
