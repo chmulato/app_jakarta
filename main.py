@@ -1034,16 +1034,17 @@ def ensure_admin_seed(email: str = "admin@meuapp.com", senha: str = "Admin@123")
             log(f"psycopg2 não disponível para semear ADMIN: {e}", "WARNING")
             return False
 
-        # Tentar gerar hash com bcrypt; caso indisponível, usar hash conhecido de Admin@123
+        # Tentar gerar hash com bcrypt; caso indisponível, usar hash conhecido de Admin@123 ($2a$)
         hash_bcrypt = "$2a$10$rF1YS1T.8QVXnpTlI.JY5u5Kz7x8TXDQ9Y2c3M4z6N8x.wJ4sA2G6"
         try:
             import bcrypt  # type: ignore
-            try:
-                hash_bcrypt = bcrypt.hashpw(senha.encode("utf-8"), bcrypt.gensalt(rounds=10)).decode("utf-8")
-            except Exception:
-                pass
+            gen = bcrypt.hashpw(senha.encode("utf-8"), bcrypt.gensalt(rounds=10)).decode("utf-8")
+            # Normalizar prefixo para $2a$ para compatibilidade com jBCrypt
+            if gen.startswith("$2b$") or gen.startswith("$2y$"):
+                gen = "$2a$" + gen[4:]
+            hash_bcrypt = gen
         except Exception:
-            # manter hash padrão
+            # manter hash padrão $2a$
             pass
 
         conn = None
@@ -1074,18 +1075,27 @@ def ensure_admin_seed(email: str = "admin@meuapp.com", senha: str = "Admin@123")
                 admin_id, admin_email, admin_hash = row[0], row[1], row[2] or ""
                 # Se o email padrão não existir mas há outro admin, manter; apenas garantir que ao menos um admin tem a senha esperada
                 needs_update = False
-                try:
-                    import bcrypt  # type: ignore
+                new_hash = None
+                # Forçar compatibilidade para jBCrypt: normalizar prefixo para $2a$ se necessário
+                if admin_hash.startswith("$2b$") or admin_hash.startswith("$2y$"):
+                    new_hash = "$2a$" + admin_hash[4:]
+                    needs_update = True
+                else:
                     try:
-                        needs_update = not bcrypt.checkpw(senha.encode("utf-8"), admin_hash.encode("utf-8"))
+                        import bcrypt  # type: ignore
+                        try:
+                            # Se a senha confere, não precisamos alterar o hash (mesmo que o salt seja diferente)
+                            needs_update = not bcrypt.checkpw(senha.encode("utf-8"), admin_hash.encode("utf-8"))
+                        except Exception:
+                            needs_update = (admin_hash != hash_bcrypt)
                     except Exception:
                         needs_update = (admin_hash != hash_bcrypt)
-                except Exception:
-                    needs_update = (admin_hash != hash_bcrypt)
 
                 if needs_update:
-                    cur.execute("UPDATE usuarios SET senha = %s WHERE id = %s", (hash_bcrypt, admin_id))
-                    log(f"Senha do ADMIN (id={admin_id}) atualizada para o hash esperado de testes.", "INFO")
+                    if new_hash is None:
+                        new_hash = hash_bcrypt
+                    cur.execute("UPDATE usuarios SET senha = %s WHERE id = %s", (new_hash, admin_id))
+                    log(f"Senha do ADMIN (id={admin_id}) atualizada (normalizada para $2a$ ou ajustada para testes).", "INFO")
                 else:
                     log("Senha do ADMIN já corresponde ao esperado para testes.", "INFO")
                 conn.commit()
@@ -2201,7 +2211,8 @@ def configure_tomcat_postgres_datasource():
             'name': target_name,
             'auth': 'Container',
             'type': 'javax.sql.DataSource',
-            'factory': 'org.apache.commons.dbcp2.BasicDataSourceFactory',
+            # Use Tomcat's built-in DBCP2 factory to avoid CNF issues
+            'factory': 'org.apache.tomcat.dbcp.dbcp2.BasicDataSourceFactory',
             'driverClassName': 'org.postgresql.Driver',
             'url': url,
             'username': db_user,
@@ -2264,7 +2275,8 @@ def validate_tomcat_jndi(runtime_check: bool = True) -> tuple[bool, str]:
             if el.tag.endswith('Resource') and (el.get('name') == 'jdbc/PostgresDS' or el.get('name') == 'java:comp/env/jdbc/PostgresDS'):
                 resource = el
                 break
-        if not resource:
+        # Element truthiness is deprecated in recent Python: compare explicitly to None
+        if resource is None:
             return False, "Resource jdbc/PostgresDS não encontrado em conf/context.xml"
         # validações básicas
         typ = (resource.get('type') or '').lower()
