@@ -1,10 +1,14 @@
 ## Projeto Java Web (Tomcat / WildFly)
 
-Aplicação Java (Jakarta EE) com autenticação, automação de build/deploy via Python e banco PostgreSQL (Docker).
+![Capa do projeto](./doc/img/article_i.png)
+
+Aplicação Java (Jakarta EE) com autenticação, automação de build/deploy via Python e banco PostgreSQL (Docker). Este README foi reorganizado para apresentar os principais cenários com imagens reais do projeto e guiar você rapidamente à execução fim a fim.
 
 —
 
 ### Visão geral
+![Visão geral (secundária)](./doc/img/article_ii.png)
+
 - Código da aplicação: `meu-projeto-java`
 - Automação: `main.py` (menu + build/deploy/diagnóstico)
 - Provisionamento Python: `setup-python.ps1` (venv + requirements)
@@ -141,6 +145,8 @@ Tomcat (recomendado via `main.py`):
 - Empacota WAR, configura `server.xml` para porta 9090 e copia como `ROOT.war` para `webapps/` do Tomcat standalone.
 - Acesso: http://localhost:9090/
 
+![Página inicial no Tomcat (porta 9090)](./doc/img/index_tomcat_9090.png)
+
 Tomcat (plugin Maven de desenvolvimento):
 ```powershell
 mvn -f .\meu-projeto-java\pom.xml tomcat10:run -DskipTests
@@ -151,6 +157,8 @@ WildFly:
 - WAR enviado para `standalone/deployments` como `ROOT.war`.
 - Acesso: http://localhost:8080/
 - Console: http://localhost:9990/
+
+![Página inicial no WildFly (porta 8080)](./doc/img/index_wildfly_8080.png)
 
 Portas podem ser ajustadas no `main.py` (`TOMCAT_PORT`, `WILDFLY_PORT`) ou nas configurações dos servidores.
 
@@ -272,16 +280,6 @@ Se o login falhar
 - Reaplique o datasource e reinicie o servidor (Tomcat reinicia via script; WildFly precisa reiniciar para novo `standalone.xml`)
 
 —
-### Imagens principais
-
-![Capa do artigo (principal)](./doc/img/article_i.png)
-
-![Capa do artigo (secundária)](./doc/img/article_ii.png)
-
-![Página inicial no Tomcat (porta 9090)](./doc/img/index_tomcat_9090.png)
-
-![Página inicial no WildFly (porta 8080)](./doc/img/index_wildfly_8080.png)
-
 ### Documentação essencial
 - Guia de Deploy: `doc/DEPLOY.md`
 - Arquitetura: `doc/ARQUITETURA.md`
