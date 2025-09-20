@@ -425,6 +425,55 @@ def _parse_form_hidden_inputs(html: str) -> dict:
     except Exception:
         return {}
 
+def _parse_login_form(html: str, base_url: str, fallback_post_url: str) -> tuple[str, dict, list[str]]:
+    """
+    Analisa o HTML do formulário de login e retorna:
+    - post_url (absoluta se possível, ou fallback)
+    - hidden_inputs (dict name->value)
+    - input_names (lista de names encontrados nos inputs do form)
+
+    Tenta identificar o <form> que contenha email/senha. Se 'action' não for absoluto,
+    resolve relativo ao base_url. Em caso de falha, retorna fallback_post_url.
+    """
+    try:
+        hidden = {}
+        input_names: list[str] = []
+        post_url = fallback_post_url
+        # Encontrar primeiro formulário
+        forms = re.findall(r"<form[^>]*>(.*?)</form>", html or "", flags=re.IGNORECASE | re.DOTALL)
+        form_block = None
+        form_action = None
+        for f in re.findall(r"<form[^>]*>", html or "", flags=re.IGNORECASE):
+            # Capturar action
+            am = re.search(r"action=['\"]([^'\"]+)['\"]", f, flags=re.IGNORECASE)
+            if am:
+                form_action = am.group(1)
+                break
+        # Se não conseguimos pegar action diretamente do tag, deixa None
+        # Pegar inputs do documento todo (simples) e coletar names
+        for tag in re.findall(r"<input[^>]*>", html or "", flags=re.IGNORECASE):
+            name_m = re.search(r"name=['\"]([^'\"]+)['\"]", tag, flags=re.IGNORECASE)
+            if name_m:
+                n = name_m.group(1)
+                if n not in input_names:
+                    input_names.append(n)
+        # Hidden inputs
+        hidden = _parse_form_hidden_inputs(html)
+        # Resolver action
+        if form_action:
+            # Se começar com http, usar direto; se começar com '/', juntar ao host do base
+            try:
+                if form_action.lower().startswith("http://") or form_action.lower().startswith("https://"):
+                    post_url = form_action
+                else:
+                    # Usar urljoin com base_url
+                    post_url = urljoin(base_url, form_action)
+            except Exception:
+                post_url = fallback_post_url
+        return post_url, hidden, input_names
+    except Exception:
+        return fallback_post_url, {}, []
+
 def deploy_tomcat_root_quick(war_path: str) -> bool:
     """Faz cold deploy no Tomcat (sem deploy a quente): para servidor, copia ROOT.war e inicia."""
     if not os.path.exists(TOMCAT_DIR):
@@ -579,14 +628,18 @@ def test_login(base_url: str, email: str = "admin@meuapp.com", senha: str = "Adm
                 # Cookies de sessão
                 ck = {k: _mask_cookie_value(v) for k, v in s.cookies.get_dict().items()}
                 log(f"Sessão inicial: cookies capturados: {ck}", "INFO")
-                # Inputs ocultos (se houver, ex.: tokens/CSRF)
-                hidden = _parse_form_hidden_inputs(getattr(r1, "text", ""))
+                html1 = getattr(r1, "text", "")
+                # Descobrir post_url via action + inputs ocultos
+                post_url, hidden, input_names = _parse_login_form(html1, base_url, login_url)
                 if hidden:
                     log(f"Campos ocultos detectados no formulário de login: {list(hidden.keys())}", "INFO")
-                else:
-                    hidden = {}
+                if input_names:
+                    log(f"Campos de input detectados: {input_names[:6]}", "INFO")
+                if post_url != login_url:
+                    log(f"Action do formulário detectado: POST → {post_url}", "INFO")
             except Exception:
                 hidden = {}
+                post_url = login_url
             # Tentar variações de parâmetros
             param_variants = [
                 {"email": email, "senha": senha},
@@ -604,8 +657,8 @@ def test_login(base_url: str, email: str = "admin@meuapp.com", senha: str = "Adm
                         "Origin": base_url.rstrip("/"),
                         "Referer": login_url,
                     }
-                    log(f"POST /login com params {list(data.keys())} + hidden {list(hidden.keys())}", "INFO")
-                    r2 = s.post(login_url, data=merged, timeout=timeout, allow_redirects=False, headers=headers)
+                    log(f"POST de login com params {list(data.keys())} + hidden {list(hidden.keys())}", "INFO")
+                    r2 = s.post(post_url, data=merged, timeout=timeout, allow_redirects=False, headers=headers)
                 except requests.RequestException as e:
                     log(f"Falha de rede ao testar login ({list(data.keys())}): {e}", "WARNING")
                     continue
@@ -620,12 +673,30 @@ def test_login(base_url: str, email: str = "admin@meuapp.com", senha: str = "Adm
                     diag_snippet = body_text[:200].replace("\n", " ").replace("\r", " ")
                     log(f"Resposta 200 de /login — snippet: {diag_snippet}", "INFO")
                     text = body_text.lower()
-                    if ("credenciais" in text) or ("login" in text and "erro" in text):
+                    if ("credenciais" in text) or ("senha é obrigatória" in text) or ("email é obrigatório" in text) or ("erro" in text and "login" in text):
                         log("Login falhou: página de erro/credenciais retornada.", "ERROR")
                         # tentar próxima variação
                         continue
-                    log("Login aparentemente bem-sucedido (HTTP 200).", "SUCCESS")
-                    return True
+                    # Validação extra: tentar acessar /dashboard com a sessão atual
+                    try:
+                        dash_url = urljoin(base_url, "dashboard")
+                        r3 = s.get(dash_url, timeout=timeout, allow_redirects=False, headers=common_headers)
+                        if r3.status_code in (301, 302, 303, 307, 308):
+                            loc = r3.headers.get("Location", "")
+                            if "/login" not in loc:
+                                log(f"Sessão válida (redirect fora de /login): {loc}", "SUCCESS")
+                                return True
+                        if r3.status_code == 200 and ("dashboard" in (r3.text or "").lower() or "usuariosRecentes" in (r3.text or "")):
+                            log("Sessão válida: /dashboard acessível após POST 200.", "SUCCESS")
+                            return True
+                        # Se 401/403/redirect para login, considerar falha
+                        if r3.status_code in (401, 403) or (r3.status_code in (301,302,303,307,308) and "/login" in r3.headers.get("Location","")):
+                            log("/dashboard não acessível após POST 200; sessão não criada.", "ERROR")
+                            continue
+                    except Exception as e:
+                        log(f"Falha ao validar /dashboard após POST 200: {e}", "WARNING")
+                        # fallback para heurística de conteúdo já aplicada
+                        continue
                 if r2.status_code in (401, 403, 404):
                     log(f"Login falhou (HTTP {r2.status_code}) com params {list(data.keys())}.", "ERROR")
                     continue
@@ -4463,20 +4534,37 @@ def main():
 
             if is_server_up("localhost", WILDFLY_PORT):
                 base = f"http://localhost:{WILDFLY_PORT}/"
-                log(f"WildFly aparentemente disponível em {base}. Testando login (browser)...", "INFO")
-                # Preferir teste via navegador para WildFly
-                ok_browser = test_login_browser(base)
-                if not ok_browser:
-                    # fallback HTTP simples
-                    log("Tentando fallback HTTP para WildFly...", "WARNING")
-                    ok_http = try_logins_for(base)
-                    if ok_http:
-                        log("Login no WildFly validado via HTTP.", "SUCCESS")
-                    else:
-                        log("Falha ao validar login no WildFly (browser e HTTP).", "ERROR")
+                # Validar deploy/endpoint antes do teste de navegação
+                wf_deployments = os.path.join(WILDFLY_DIR, "standalone", "deployments")
+                marker_deployed = os.path.join(wf_deployments, "ROOT.war.deployed")
+                has_marker = os.path.exists(marker_deployed)
+                login_ready = wait_for_url(urljoin(base, "login"), timeout=20)
+                wildfly_ready = has_marker or login_ready
+                if not has_marker:
+                    log("WildFly: marker ROOT.war.deployed não encontrado.", "WARNING")
+                if not login_ready:
+                    log("WildFly: /login não respondeu com 2xx/3xx dentro do tempo.", "WARNING")
+                if not wildfly_ready:
+                    # Diagnóstico rápido e pular teste de navegação
+                    log("WildFly parece não ter concluído o deploy. Pulando testes de login para evitar falso negativo.", "ERROR")
+                    # Tentar um fallback leve: checar página raiz
+                    if not wait_for_url(base, timeout=10):
+                        log("WildFly raiz também não respondeu. Verifique logs em standalone/log/server.log.", "ERROR")
                 else:
-                    log("Login no WildFly validado via navegador.", "SUCCESS")
-                tested_any = True
+                    log(f"WildFly aparentemente disponível em {base}. Testando login (browser)...", "INFO")
+                    # Preferir teste via navegador para WildFly
+                    ok_browser = test_login_browser(base)
+                    if not ok_browser:
+                        # fallback HTTP simples
+                        log("Tentando fallback HTTP para WildFly...", "WARNING")
+                        ok_http = try_logins_for(base)
+                        if ok_http:
+                            log("Login no WildFly validado via HTTP.", "SUCCESS")
+                        else:
+                            log("Falha ao validar login no WildFly (browser e HTTP).", "ERROR")
+                    else:
+                        log("Login no WildFly validado via navegador.", "SUCCESS")
+                    tested_any = True
             else:
                 log("WildFly não está em execução.", "WARNING")
 
