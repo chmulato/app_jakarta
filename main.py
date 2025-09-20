@@ -4894,6 +4894,26 @@ def main():
         
         elif option == "12":
             log("[12] Teste E2E: validar build, deploy (Tomcat frio, WildFly quente), DB e logins", "INFO")
+            # 0) Parar servidores no início para garantir estado limpo
+            try:
+                any_running = False
+                if is_server_up("localhost", TOMCAT_PORT):
+                    any_running = True
+                    log("Tomcat detectado em execução — enviando shutdown...", "INFO")
+                    stop_tomcat_server()
+                # WildFly pode responder na HTTP (8080) ou na management (9990)
+                if is_server_up("localhost", WILDFLY_PORT) or is_server_up("localhost", WILDFLY_MANAGEMENT_PORT):
+                    any_running = True
+                    log("WildFly detectado em execução — enviando shutdown...", "INFO")
+                    stop_wildfly_server()
+                if any_running:
+                    # Pequena espera adicional para liberação de portas/arquivos
+                    time.sleep(2)
+                    log("Servidores parados. Prosseguindo com o processo E2E...", "SUCCESS")
+                else:
+                    log("Nenhum servidor em execução no início da opção 12.", "INFO")
+            except Exception as e:
+                log(f"Falha ao tentar parar servidores no início da opção 12: {e}", "WARNING")
             # 1) Banco de dados
             if not ensure_docker_db_up():
                 log("Banco de dados indisponível. Abortando.", "ERROR")
