@@ -38,13 +38,12 @@ public class JPAUtil {
                 return;
             }
             
-            // Configurar propriedades para utilizar o DataSource diretamente
-            logger.info("Configurando propriedades do JPA com DataSource...");
+            // Configurar propriedades para utilizar HikariCP via JDBC URL (evita conflito driverClassName x dataSourceClassName)
+            logger.info("Configurando propriedades do JPA com HikariCP (jdbcUrl/driver)...");
             Map<String, Object> properties = new HashMap<>();
             
-            // Configuração para utilizar o DataSource e conexões diretas JDBC
+            // Usar o provider HikariCP
             properties.put("hibernate.connection.provider_class", "org.hibernate.hikaricp.internal.HikariCPConnectionProvider");
-            properties.put("hibernate.hikari.dataSourceClassName", "org.postgresql.ds.PGSimpleDataSource");
             
             // Configuração do scanner de classes Hibernate/Jandex
             properties.put("hibernate.archive.scanner", "org.hibernate.boot.archive.scan.internal.DisabledScanner");
@@ -56,17 +55,21 @@ public class JPAUtil {
             String jdbcUsername = System.getProperty("DB_USER", "meu_app_user");
             String jdbcPassword = System.getProperty("DB_PASS", "meu_app_password");
             
-            // Configurar as propriedades do PGSimpleDataSource
-            properties.put("hibernate.hikari.dataSource.serverName", jdbcHost);
-            properties.put("hibernate.hikari.dataSource.portNumber", jdbcPort);
-            properties.put("hibernate.hikari.dataSource.databaseName", jdbcDatabase);
-            properties.put("hibernate.hikari.dataSource.user", jdbcUsername);
-            properties.put("hibernate.hikari.dataSource.password", jdbcPassword);
+            // Construir JDBC URL
+            String jdbcUrl = String.format("jdbc:postgresql://%s:%s/%s", jdbcHost, jdbcPort, jdbcDatabase);
+            
+            // Configurar Hikari via JDBC URL (sem dataSourceClassName)
+            properties.put("hibernate.hikari.jdbcUrl", jdbcUrl);
+            properties.put("hibernate.hikari.username", jdbcUsername);
+            properties.put("hibernate.hikari.password", jdbcPassword);
+            properties.put("hibernate.hikari.driverClassName", "org.postgresql.Driver");
             
             // Configurações do pool HikariCP
-            properties.put("hibernate.hikari.minimumIdle", "5");
-            properties.put("hibernate.hikari.maximumPoolSize", "20");
+            // Reduzir pool para ambiente de desenvolvimento/teste e evitar excesso de conexões
+            properties.put("hibernate.hikari.minimumIdle", "1");
+            properties.put("hibernate.hikari.maximumPoolSize", "5");
             properties.put("hibernate.hikari.idleTimeout", "30000");
+            properties.put("hibernate.hikari.leakDetectionThreshold", "20000");
             
             // Configurar outras propriedades importantes
             properties.put("hibernate.hbm2ddl.auto", "update");

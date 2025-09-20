@@ -22,11 +22,7 @@
             <!-- Schema generation -->
             <property name="hibernate.hbm2ddl.auto" value="update"/>
             
-            <!-- Conexão JDBC - será sobrescrita pelo JPAUtil -->
-            <property name="jakarta.persistence.jdbc.driver" value="org.postgresql.Driver"/>
-            <property name="jakarta.persistence.jdbc.url" value="jdbc:postgresql://localhost:5432/meu_app_db"/>
-            <property name="jakarta.persistence.jdbc.user" value="meu_app_user"/>
-            <property name="jakarta.persistence.jdbc.password" value="meu_app_password"/>
+            <!-- Configurações JDBC removidas para evitar conflito com Hikari (definido programaticamente em JPAUtil) -->
             
             <!-- Cache de segundo nível (opcional) -->
             <property name="hibernate.cache.use_second_level_cache" value="false"/>
