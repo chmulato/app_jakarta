@@ -1,10 +1,10 @@
-## 🚀 Projeto Java Web (Tomcat / WildFly)
+## Projeto Java Web (Tomcat / WildFly)
 
-Aplicação Java (Jakarta EE) com autenticação, deploy via Tomcat ou WildFly, automação em Python e banco PostgreSQL em Docker.
+Aplicação Java (Jakarta EE) com autenticação, automação de build/deploy via Python e banco PostgreSQL (Docker).
 
 —
 
-### Visão Geral
+### Visão geral
 - Código da aplicação: `meu-projeto-java`
 - Automação: `main.py` (menu + build/deploy/diagnóstico)
 - Provisionamento Python: `setup-python.ps1` (venv + requirements)
@@ -16,7 +16,7 @@ Aplicação Java (Jakarta EE) com autenticação, deploy via Tomcat ou WildFly, 
 
 —
 
-### Sequência de Scripts (Recomendado)
+### Sequência de scripts (recomendado)
 1. `setup-python.ps1`: prepara o ambiente Python local (cria `venv` e instala `requirements.txt`).
 2. `setup.dev.py`: valida configuração do ambiente de desenvolvimento (Java, Maven, Docker, PostgreSQL, bcrypt) e pode tentar corrigir.
 3. `main.py`: menu para build, deploy e gestão dos servidores (Tomcat/WildFly).
@@ -39,7 +39,7 @@ docker --version
 
 —
 
-### Setup Rápido (Windows PowerShell)
+### Setup rápido (Windows PowerShell)
 1) Preparar o ambiente Python (cria venv e instala requirements):
 ```powershell
 ./setup-python.ps1
@@ -65,7 +65,6 @@ python .\main.py
 ```
 
 —
-
 ### Execução (menu Python)
 Abra o menu interativo e siga as opções de build/deploy/diagnóstico:
 ```powershell
@@ -82,6 +81,26 @@ python .\main.py
 python .\main.py --tomcat-dir C:\servers\tomcat10 --wildfly-dir D:\wildfly-37
 ```
 Logs do orquestrador: `log/maven_deploy.log`.
+
+—
+### Execução fim a fim (Opção 12)
+A opção 12 realiza um fluxo completo e não interativo:
+- para Tomcat e WildFly (se estiverem rodando), garantindo estado limpo;
+- sobe o PostgreSQL (Docker) e valida a conexão;
+- garante a semente do usuário ADMIN com hash BCrypt $2a$ (compatível com jBCrypt);
+- executa o build da aplicação (Maven);
+- faz deploy no Tomcat (cold deploy) e no WildFly (hot deploy);
+- valida JNDI/datasource por servidor (nomes distintos) e testa o login via browser headless.
+
+Comando:
+```powershell
+python .\main.py 12
+```
+
+Padrões importantes:
+- JNDI: Tomcat usa `java:comp/env/jdbc/PostgresDS`; WildFly usa `java:/jdbc/PostgresDS`.
+- Contexto: o contexto padrão do WAR é `/meu-projeto-java`. Se o WAR for publicado como `ROOT.war`, o contexto será `/`.
+- Portas: Tomcat 9090; WildFly 8080; WildFly management 9990.
 
 —
 
@@ -103,7 +122,7 @@ python .\setup.dev.py --auto-fix
 
 —
 
-### Build e Testes (Maven)
+### Build e testes (Maven)
 ```powershell
 cd .\meu-projeto-java
 mvn clean package -DskipTests
@@ -117,7 +136,6 @@ mvn -Prun
 ```
 
 —
-
 ### Deploy
 Tomcat (recomendado via `main.py`):
 - Empacota WAR, configura `server.xml` para porta 9090 e copia como `ROOT.war` para `webapps/` do Tomcat standalone.
@@ -137,7 +155,6 @@ WildFly:
 Portas podem ser ajustadas no `main.py` (`TOMCAT_PORT`, `WILDFLY_PORT`) ou nas configurações dos servidores.
 
 —
-
 ### Datasource (PostgreSQL)
 - Origem das credenciais: lidas do `docker-compose.yml` (serviço `postgres`) e aplicadas no Tomcat/WildFly.
 - Overrides por ambiente: se definir, as variáveis `APP_DB_HOST`, `APP_DB_PORT`, `APP_DB_NAME`, `APP_DB_USER`, `APP_DB_PASSWORD` têm precedência.
@@ -173,15 +190,14 @@ Observações:
 - É feito backup automático de `standalone.xml` e `context.xml` (`*.bak`) antes de alterações.
 - O driver JDBC do PostgreSQL (42.7.4) é baixado automaticamente quando necessário.
 
-### Variáveis/Argumentos Úteis
+### Variáveis/argumentos úteis
 - `APP_TOMCAT_DIR`: caminho do Tomcat
 - `APP_WILDFLY_DIR`: caminho do WildFly
 - `--tomcat-dir` / `--wildfly-dir`: overrides via CLI
 - `--only-check`: somente validações e saída
 
 —
-
-### Troubleshooting Rápido
+### Troubleshooting rápido
 - Porta ocupada (8080/9090):
 ```powershell
 netstat -ano | findstr :8080
@@ -216,7 +232,6 @@ Teste rápido do pacote dentro da venv:
 Documentação adicional: `doc/DEPLOY.md`, `doc/ARQUITETURA.md`, `doc/RESULTADOS-TESTES.md`.
 
 —
-
 ### Estrutura (resumo)
 ```
 app_jakarta/
@@ -230,7 +245,7 @@ app_jakarta/
  └─ log/ (maven_deploy.log)
 ```
 
-### Testar Login (Tomcat e WildFly)
+### Testar login (Tomcat e WildFly)
 Os servidores ficam em `server/`. Abaixo o passo a passo para subir, publicar e validar login.
 
 Pré‑requisitos
@@ -257,11 +272,28 @@ Se o login falhar
 - Reaplique o datasource e reinicie o servidor (Tomcat reinicia via script; WildFly precisa reiniciar para novo `standalone.xml`)
 
 —
+### Imagens principais
 
-### Licença e Suporte
+![Capa do artigo (principal)](./doc/img/article_i.png)
+
+![Capa do artigo (secundária)](./doc/img/article_ii.png)
+
+![Página inicial no Tomcat (porta 9090)](./doc/img/index_tomcat_9090.png)
+
+![Página inicial no WildFly (porta 8080)](./doc/img/index_wildfly_8080.png)
+
+### Documentação essencial
+- Guia de Deploy: `doc/DEPLOY.md`
+- Arquitetura: `doc/ARQUITETURA.md`
+- Comandos Maven: `doc/MAVEN-COMANDOS.md`
+- Validação/Testes: `doc/TESTES-RELATORIO.md` e `doc/RESULTADOS-TESTES.md`
+- Perfil VS Code sem MCP: `doc/README_NO_MCP.md`
+
+Observação: o artigo executivo está em `doc/ARTICLE.md`, não referenciado como guia técnico.
+
+### Licença e suporte
 - Uso interno/educacional. Defina licença se for público.
 - Para suporte, anexe passos, `log/maven_deploy.log`, SO e versões (Java/Maven/Docker).
 
 —
-
-Última atualização: 18 de Setembro de 2025
+Última atualização: 20 de setembro de 2025
