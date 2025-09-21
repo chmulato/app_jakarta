@@ -48,6 +48,13 @@ Publicar em Tomcat ou em WildFly sempre teve diferenças práticas. Nosso fluxo 
 - Checagem de banco e credenciais de teste para garantir que “logar” funciona de ponta a ponta.
 - Registro de evidências (logs) para auditoria e diagnóstico.
 
+### Como acionamos (menu simples)
+
+Para o time, tudo acontece a partir de um menu único (main.py). É possível executar o fluxo completo em um passo (opção 12) ou rodar etapas específicas quando necessário.
+
+![Opções do terminal (main.py)](./img/terminal_opcoes.png)
+<sub><em>Menu do orquestrador: opções de build, deploy e validação. A opção 12 executa o fluxo fim a fim.</em></sub>
+
 ### Próximos passos
 
 - Levar o mesmo fluxo para uma esteira de CI/CD de forma leve.

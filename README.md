@@ -118,6 +118,9 @@ Comando:
 python .\main.py 12
 ```
 
+![Opções do menu (main.py)](./doc/img/terminal_opcoes.png)
+<sub><em>Menu do orquestrador: opções de build, deploy e validação. A opção 12 executa o fluxo fim a fim.</em></sub>
+
 Padrões importantes:
 - JNDI: Tomcat usa `java:comp/env/jdbc/PostgresDS`; WildFly usa `java:/jdbc/PostgresDS`.
 - Contexto: o contexto padrão do WAR é `/meu-projeto-java`. Se o WAR for publicado como `ROOT.war`, o contexto será `/`.
