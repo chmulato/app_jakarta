@@ -312,7 +312,8 @@ Se o login falhar
 Observação: o artigo executivo está em `doc/ARTICLE.md`, não referenciado como guia técnico.
 
 ### Licença e suporte
-- Uso interno/educacional. Defina licença se for público.
+- Licença: Apache License 2.0. Consulte `LICENSE` e `NOTICE`.
+- Direitos autorais: © 2025 23.969.028 CHRISTIAN VLADIMIR UHDRE MULATO (CNPJ 23.969.028/0001-37).
 - Para suporte, anexe passos, `log/maven_deploy.log`, SO e versões (Java/Maven/Docker).
 
 —
