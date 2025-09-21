@@ -35,6 +35,21 @@ Aplicação Java (Jakarta EE) com autenticação, automação de build/deploy vi
 - Docker Desktop (Compose v2) para banco local
 - Python 3.10+ (para `main.py` e `setup.dev.py`)
 
+Observação importante sobre servidores (não versionados):
+- Este repositório não inclui os binários dos servidores de aplicação.
+- Prepare a pasta `server/` localmente com as versões específicas:
+  - `server/apache-tomcat-10.1.35/` (Tomcat 10.1.35)
+  - `server/wildfly-37.0.1.Final/` (WildFly 37.0.1.Final)
+- Alternativa: aponte para instalações existentes usando variáveis de ambiente ou argumentos de CLI:
+  - `APP_TOMCAT_DIR` e `APP_WILDFLY_DIR`
+  - ou `--tomcat-dir` e `--wildfly-dir` ao chamar o `main.py`
+  - Exemplo (PowerShell):
+    ```powershell
+    $env:APP_TOMCAT_DIR = 'C:\servers\apache-tomcat-10.1.35'
+    $env:APP_WILDFLY_DIR = 'D:\servers\wildfly-37.0.1.Final'
+    python .\main.py --only-check
+    ```
+
 Teste rápido (PowerShell):
 ```powershell
 java -version
