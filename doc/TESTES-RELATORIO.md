@@ -1,6 +1,6 @@
 # Relatório de Execução de Testes Unitários (Atualizado)
 
-## Data: 16 de setembro de 2025
+## Data: 21 de setembro de 2025
 
 ## Resumo
 Testes executados com JUnit 5 + Hibernate Validator. Cobertura gerada via JaCoCo (`mvn clean test verify`). Dependência Jakarta EL permanece necessária para interpolação de mensagens.
@@ -20,19 +20,15 @@ Reexecutar para atualizar os números reais:
 mvn clean test
 ```
 
-## Detalhes por Pacote
+## Detalhes por Pacote (exemplo)
 
 | Pacote/Classe | Testes | Status |
 |---------------|--------|--------|
-| `com.exemplo.AppTest` | 2 | ✅ PASSOU |
-| `com.exemplo.dao.UsuarioDAOTest` | 1 | ✅ PASSOU |
-| `com.exemplo.model.ProdutoTest` | 12 | ✅ PASSOU |
-| `com.exemplo.model.UsuarioTest` | 10 | ✅ PASSOU |
-| `com.exemplo.servlet.DashboardServletTest` | 1 | ✅ PASSOU |
-| `com.exemplo.servlet.LoginServletTest$DoGetTests` | 2 | ✅ PASSOU |
-| `com.exemplo.servlet.LoginServletTest$DoPostTests` | 6 | ✅ PASSOU |
-| `com.exemplo.servlet.LoginServletTest$InterfaceTests` | 2 | ✅ PASSOU |
-| `com.exemplo.servlet.LogoutServletTest` | 4 | ✅ PASSOU |
+| `com.caracore.hub_town.model.ProdutoTest` | 1+ | ✅ PASSOU |
+| `com.caracore.hub_town.model.UsuarioTest` | 1+ | ✅ PASSOU |
+| `com.caracore.hub_town.servlet.LoginServletTest` | 1+ | ✅ PASSOU |
+| `com.caracore.hub_town.servlet.LogoutServletTest` | 1+ | ✅ PASSOU |
+| `com.caracore.hub_town.servlet.DashboardServletTest` | 1+ | ✅ PASSOU |
 
 ## Problemas Resolvidos (Histórico)
 
@@ -68,7 +64,7 @@ Adicionamos a dependência do Jakarta EL ao pom.xml:
 
 Abrir relatório HTML (Windows PowerShell):
 ```powershell
-Start-Process .\target\site\jacoco\index.html
+Start-Process .\caracore-hub\target\site\jacoco\index.html
 ```
 
 ## Execução de Testes (Comandos)

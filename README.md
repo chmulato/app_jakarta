@@ -1,9 +1,9 @@
-## Projeto Java Web (Tomcat / WildFly)
+## caracore-hub — Jakarta EE (Tomcat / WildFly)
 
 ![Capa do projeto](./doc/img/article_i.png)
 <sub><em>Capa do projeto — automação de build e deploy com foco em previsibilidade.</em></sub>
 
-Aplicação Java (Jakarta EE) com autenticação, automação de build/deploy via Python e banco PostgreSQL (Docker). Este README foi reorganizado para apresentar os principais cenários com imagens reais do projeto e guiar você rapidamente à execução fim a fim.
+Aplicação Java (Jakarta EE) com autenticação, automação de build/deploy via Python e banco PostgreSQL (Docker). Este README foi atualizado para refletir o rename do projeto para "caracore-hub", o contexto padrão `/caracore-hub` e o fluxo E2E da opção 12.
 
 —
 
@@ -11,7 +11,7 @@ Aplicação Java (Jakarta EE) com autenticação, automação de build/deploy vi
 ![Visão geral (secundária)](./doc/img/article_ii.png)
 <sub><em>Visão geral do fluxo: banco de dados, build, deploy e validação de login.</em></sub>
 
-- Código da aplicação: `meu-projeto-java`
+- Código da aplicação: `caracore-hub`
 - Automação: `main.py` (menu + build/deploy/diagnóstico)
 - Provisionamento Python: `setup-python.ps1` (venv + requirements)
 - Validação ambiente dev: `setup.dev.py` (checagens e auto-fix opcionais)
@@ -101,7 +101,7 @@ python .\main.py
 # ou via argumentos
 python .\main.py --tomcat-dir C:\servers\tomcat10 --wildfly-dir D:\wildfly-37
 ```
-Logs do orquestrador: `log/maven_deploy.log`.
+Logs do orquestrador: arquivos em `log/*.log`.
 
 —
 ### Execução fim a fim (Opção 12)
@@ -123,7 +123,7 @@ python .\main.py 12
 
 Padrões importantes:
 - JNDI: Tomcat usa `java:comp/env/jdbc/PostgresDS`; WildFly usa `java:/jdbc/PostgresDS`.
-- Contexto: o contexto padrão do WAR é `/meu-projeto-java`. Se o WAR for publicado como `ROOT.war`, o contexto será `/`.
+- Contexto: o contexto padrão do WAR é `/caracore-hub`. Se o WAR for publicado como `ROOT.war`, o contexto será `/`.
 - Portas: Tomcat 9090; WildFly 8080; WildFly management 9990.
 
 —
@@ -148,7 +148,7 @@ python .\setup.dev.py --auto-fix
 
 ### Build e testes (Maven)
 ```powershell
-cd .\meu-projeto-java
+cd .\caracore-hub
 mvn clean package -DskipTests
 mvn clean test verify
 ```
@@ -162,21 +162,21 @@ mvn -Prun
 —
 ### Deploy
 Tomcat (recomendado via `main.py`):
-- Empacota WAR, configura `server.xml` para porta 9090 e copia como `ROOT.war` para `webapps/` do Tomcat standalone.
-- Acesso: http://localhost:9090/
+- Empacota WAR, configura `server.xml` para porta 9090 e copia `caracore-hub.war` para `webapps/` do Tomcat standalone.
+- Acesso: http://localhost:9090/caracore-hub
 
 ![Página inicial no Tomcat (porta 9090)](./doc/img/index_tomcat_9090.png)
 <sub><em>Aplicação publicada no Tomcat (porta 9090) com contexto ROOT.</em></sub>
 
 Tomcat (plugin Maven de desenvolvimento):
 ```powershell
-mvn -f .\meu-projeto-java\pom.xml tomcat10:run -DskipTests
+mvn -f .\caracore-hub\pom.xml tomcat10:run -DskipTests
 ```
-- Porta padrão do plugin: 8080 → http://localhost:8080/
+- Porta padrão do plugin: 8080 → http://localhost:8080/caracore-hub
 
 WildFly:
-- WAR enviado para `standalone/deployments` como `ROOT.war`.
-- Acesso: http://localhost:8080/
+- WAR enviado para `standalone/deployments` como `caracore-hub.war`.
+- Acesso: http://localhost:8080/caracore-hub
 - Console: http://localhost:9990/
 
 ![Página inicial no WildFly (porta 8080)](./doc/img/index_wildfly_8080.png)
@@ -269,7 +269,7 @@ app_jakarta/
  ├─ docker-compose.yml
  ├─ docker/
  │   └─ postgres/init/01-init.sql
- ├─ meu-projeto-java/
+ ├─ caracore-hub/
  │   └─ pom.xml, src/
  ├─ server/ (criado se Tomcat/WildFly standalone forem usados)
  └─ log/ (maven_deploy.log)
@@ -284,7 +284,7 @@ Pré‑requisitos
 
 Tomcat (porta 9090)
 1) Via `main.py`, escolha o deploy no Tomcat; o script coloca `ROOT.war` em `server/apache-tomcat-*/webapps` e reinicia se necessário.
-2) Abra: http://localhost:9090/
+2) Abra: http://localhost:9090/caracore-hub
 3) Faça login com:
   - admin@meuapp.com / Admin@123 (ADMIN)
   - joao@exemplo.com / Admin@123 (USUARIO)
@@ -292,8 +292,8 @@ Tomcat (porta 9090)
 WildFly (porta 8080)
 1) Configure o datasource de Postgres pelo `main.py` (gera `standalone.xml` a partir do template e garante o driver JDBC).
 2) Inicie o servidor (menu do `main.py` ou `server/wildfly-*/bin/standalone.bat`).
-3) O deploy via `main.py` publica como `ROOT.war` em `standalone/deployments`.
-4) Abra: http://localhost:8080/
+3) O deploy via `main.py` publica `caracore-hub.war` em `standalone/deployments`.
+4) Abra: http://localhost:8080/caracore-hub
 5) Login com as mesmas credenciais.
 
 Se o login falhar
@@ -317,4 +317,4 @@ Observação: o artigo executivo está em `doc/ARTICLE.md`, não referenciado co
 - Para suporte, anexe passos, `log/maven_deploy.log`, SO e versões (Java/Maven/Docker).
 
 —
-Última atualização: 20 de setembro de 2025
+Última atualização: 21 de setembro de 2025

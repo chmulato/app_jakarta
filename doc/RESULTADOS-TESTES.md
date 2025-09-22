@@ -5,6 +5,7 @@
 |------|----------|
 | 16/09/2025 | Testes pós-refatoração inicial (scripts PowerShell) |
 | 17/09/2025 | Ajuste portas (Tomcat→9090 / WildFly→8080), adoção de `main.py` |
+| 21/09/2025 | E2E (opção 12) validado em Tomcat e WildFly; login automatizado via fallback HTTP |
 
 ## Objetivo
 Testar o deploy da aplicação Java nos servidores Tomcat e WildFly após refatoração da arquitetura.
@@ -15,7 +16,7 @@ Testar o deploy da aplicação Java nos servidores Tomcat e WildFly após refato
 
 ---
 
-## Resultados por servidor
+## Resultados por servidor (E2E atualizado)
 
 ### WildFly 37.0.1.Final (porta HTTP 8080 / mgmt 9990)
 
@@ -30,9 +31,8 @@ Testar o deploy da aplicação Java nos servidores Tomcat e WildFly após refato
 
 **Comando executado:**
 ```powershell
-mvn clean package -Pwildfly wildfly:deploy -DskipTests
-# ou via script
-python .\main.py (opção 4)
+mvn clean package -Pwildfly -DskipTests
+python .\main.py 12   # E2E inclui deploy e validação
 ```
 
 **Resultado:** BUILD SUCCESS ✅
@@ -53,9 +53,7 @@ python .\main.py (opção 4)
 **Comando executado:**
 ```powershell
 mvn clean package -Ptomcat -DskipTests
-mvn tomcat10:run -Ptomcat -Dmaven.tomcat.port=9090
-# ou via script
-python .\main.py (opção 2)
+python .\main.py 12   # E2E inclui deploy e validação
 ```
 
 **Correção aplicada:**
@@ -70,25 +68,10 @@ python .\main.py (opção 2)
 
 ---
 
-## Arquitetura implementada
-
-### Princípios alcançados
-- **Sem hardcode**: Portas e caminhos via properties
-- **Separação limpa**: Interfaces e classes abstratas
-- **Flexibilidade**: Múltiplos perfis Maven
-- **Configuração dinâmica**: System properties + environment variables
-
-### Estrutura de código
-```
-src/main/java/
-├── com.exemplo.server/
-│   ├── WebServerInterface.java      ✅ Interface base
-│   ├── AbstractWebServer.java       ✅ Classe abstrata
-│   ├── tomcat/
-│   │   └── WebServer.java          ⚠️ Funcional (JPA issue)
-│   └── wildfly/
-│       └── WildFlyServer.java      ✅ Completo
-```
+## Observações de arquitetura (atual)
+- Projeto renomeado para `caracore-hub`; pacote base `com.caracore.hub_town`.
+- Contexto padrão `/caracore-hub` em ambos os servidores.
+- JNDI distintos: Tomcat `java:comp/env/jdbc/PostgresDS`, WildFly `java:/jdbc/PostgresDS`.
 
 ---
 
@@ -141,4 +124,4 @@ mvn test
 - **Arquitetura**: Clean code principles aplicados com sucesso
 - **Flexibilidade**: Zero hardcode, configuração totalmente externa
 
-**🏆 Conclusão:** Arquitetura refatorada com sucesso. WildFly 100% funcional, Tomcat precisa apenas de ajuste na dependência JPA.
+**🏆 Conclusão:** E2E validado em 21/09/2025. WildFly e Tomcat funcionais, login automatizado confirmado (HTTP 302 → /caracore-hub/dashboard). Logs e CLI do WildFly podem ter timeouts intermitentes; não bloqueiam a validação.

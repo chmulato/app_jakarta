@@ -6,6 +6,8 @@
 |------|-------|
 | 16/09/2025 | Refatoração inicial de scripts PowerShell e perfis Maven |
 | 17/09/2025 | Introdução do orquestrador Python `main.py` consolidando build/deploy/test |
+| 20/09/2025 | Alinhamento de JNDI e contextos; ajuste Tomcat/WildFly; início do rename |
+| 21/09/2025 | Rename do módulo para `caracore-hub`, pacote `com.caracore.hub_town`, fix `context.xml`, E2E opção 12 validado |
 
 ## Estado Atual
 O gerenciamento principal de build, deploy, diagnóstico e limpeza foi migrado para `main.py`, reduzindo dependência de múltiplos scripts PowerShell. Os scripts antigos permanecem como referência histórica ou uso pontual e poderão ser removidos/arquivados posteriormente.
@@ -57,10 +59,11 @@ O gerenciamento principal de build, deploy, diagnóstico e limpeza foi migrado p
 - **Benefício**: Melhor diagnóstico e resolução de problemas
 
 ## Arquivos Modificados
-- `Start-App.ps1`: Refatorado para usar perfis Maven e centralizar comandos
-- `Maven-Commands.ps1`: Novo script para execução simplificada de comandos Maven
-- `doc\MAVEN-COMANDOS.md`: Documentação detalhada dos comandos Maven
-- `Execute-RefactoredDeployment.ps1`: Script para testar a refatoração
+- Renomeação do módulo: `meu-projeto-java` → `caracore-hub`
+- Migração de pacotes Java: `com.exemplo` → `com.caracore.hub_town` (código e testes)
+- Ajustes de JPA/Hibernate: `Produto` com `descricao` e `preco` BigDecimal; `persistence.xml` alinhado
+- Configuração Tomcat: `META-INF/context.xml` com Resource `jdbc/PostgresDS`
+- Documentação: atualização de README e guias em `doc/`
 
 ## Como Usar (LEGADO / PowerShell)
 
@@ -111,9 +114,13 @@ python .\main.py --only-check
 
 # Override diretórios
 python .\main.py --tomcat-dir C:\servers\tomcat10 --wildfly-dir C:\servers\wildfly37
+
+# Execução fim a fim (com deploy + validação de login em Tomcat e WildFly)
+python .\main.py 12
 ```
 
 ## Próximos Passos Sugeridos
 - Descontinuar scripts não utilizados após período de transição
 - Adicionar testes automatizados para funções Python críticas
 - Parametrizar portas por argumentos (`--tomcat-port`, `--wildfly-port`)
+ - Adicionar endpoint simples de health/JNDI para validação via HTTP

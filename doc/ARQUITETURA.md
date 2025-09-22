@@ -16,16 +16,16 @@ server/
 
 ## Estrutura de código da aplicação
 ```
-meu-projeto-java/
+caracore-hub/
  ├── pom.xml
  └── src/
-   ├── main/java/com/exemplo/
-   │   ├── servlet/      # Servlets e camadas web
-   │   ├── dao/          # Acesso a dados
-   │   ├── model/        # Entidades / modelos
-   │   └── config/       # Configurações gerais (se houver)
-   ├── main/resources/
-   └── main/webapp/      # JSP / WEB-INF / recursos estáticos
+   ├── main/java/com/caracore/hub_town/
+   │   ├── servlet/      # Servlets e camada web (Login/Dashboard/Logout/AuthFilter)
+   │   ├── dao/          # Acesso a dados (JPAUtil, UsuarioDAO)
+   │   ├── model/        # Entidades (Usuario, Produto)
+   │   └── config/       # Configurações auxiliares
+   ├── main/resources/   # META-INF/persistence.xml
+   └── main/webapp/      # JSP / WEB-INF / META-INF/context.xml
 ```
 
 Não há mais pacote `server/` com classes abstratas específicas; o controle de execução está encapsulado no fluxo Maven + script Python.
@@ -98,7 +98,7 @@ Funções: `diagnose_tomcat_issues()` e `diagnose_wildfly_issues()` examinam log
 - Datasource/JNDI: nomes distintos por servidor.
   - Tomcat: `java:comp/env/jdbc/PostgresDS` (definido em `conf/context.xml`, factory DBCP do Tomcat)
   - WildFly: `java:/jdbc/PostgresDS` (definido em `standalone.xml` com módulo JDBC do PostgreSQL)
-- Contexto do WAR: padrão `/meu-projeto-java` via metadados do artefato; quando publicado como `ROOT.war`, o contexto efetivo passa a ser `/`.
+- Contexto do WAR: padrão `/caracore-hub` via metadados do artefato (finalName); quando publicado como `ROOT.war`, o contexto efetivo passa a ser `/`.
 - Orquestrador detecta e ajusta URLs conforme servidor/porta/contexto.
 
 ## Segurança e autenticação (seed)
@@ -107,6 +107,11 @@ Funções: `diagnose_tomcat_issues()` e `diagnose_wildfly_issues()` examinam log
 
 ## Execução fim a fim
 - Opção 12 do `main.py` realiza: parada preventiva de servidores, preparação do banco, seed de usuário, build, deploy nos dois servidores, validações de JNDI e teste automático de login.
+
+## Pacotes e unidade de persistência
+- Pacote base Java: `com.caracore.hub_town`
+- Unidade de persistência (PU): `meuAppPU`
+- Entidades mapeadas: `Usuario`, `Produto` (Produto com campos `descricao` e `preco` BigDecimal)
 
 ## Resumo
 Arquitetura simplificada, centrada em automação externa, com flexibilidade para múltiplos ambientes e fácil evolução.

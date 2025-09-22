@@ -23,7 +23,7 @@ docker --version
 ```
 Para banco (PostgreSQL via Docker):
 ```powershell
-docker-compose up -d postgres
+docker compose up -d postgres
 docker ps --filter "name=postgres"
 ```
 Se estiver em Windows e usando Docker Desktop, certifique-se de que o daemon iniciou (o comando abaixo deve responder sem erro):
@@ -79,13 +79,13 @@ mvn -Prun
 # Build + run (plugin)
 mvn clean package tomcat10:run -Ptomcat -DskipTests -Dmaven.tomcat.port=9090
 # Já empacotado
-target/*.war -> copiar para webapps/ (se usar standalone)
+target/caracore-hub.war -> copiar para webapps/ (se usar standalone)
 ```
 Via script: Menu → Opção 2 (deploy) / Opção 3 (iniciar sem deploy).
 
 Notas:
 - JNDI no Tomcat: `java:comp/env/jdbc/PostgresDS` (configurado em `conf/context.xml` usando factory DBCP do Tomcat).
-- Contexto: se o WAR for publicado como `ROOT.war`, o acesso será `http://localhost:9090/`.
+- Contexto: acesso padrão `http://localhost:9090/caracore-hub`. Se publicado como `ROOT.war`, o acesso será `http://localhost:9090/`.
 
 ## Deploy WildFly
 ```powershell
@@ -98,7 +98,7 @@ Via script: Menu → Opção 4 (deploy) / Opção 5 (iniciar sem deploy).
 
 Notas:
 - JNDI no WildFly: `java:/jdbc/PostgresDS` (configurado em `standalone.xml`).
-- Contexto: `ROOT.war` resulta em contexto `/` (http://localhost:8080/).
+- Contexto: acesso padrão `http://localhost:8080/caracore-hub`. Se publicado como `ROOT.war`, o contexto será `/` (http://localhost:8080/).
 
 ## Overrides de Diretório
 Precedência: argumento > variável ambiente > padrão.
@@ -130,7 +130,7 @@ Remove-Item .\server\wildfly-37.0.1.Final\standalone\deployments\* -Force -Error
 ## Testes + Cobertura
 ```powershell
 mvn clean test verify
-Start-Process .\meu-projeto-java\target\site\jacoco\index.html
+Start-Process .\caracore-hub\target\site\jacoco\index.html
 ```
 
 ## Troubleshooting / Erros Comuns
