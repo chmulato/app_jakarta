@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Context>
+	<!-- Context path is derived from WAR name (caracore-hub.war). Do not set 'path' here. -->
+
+	<!-- Tomcat JNDI DataSource for PostgreSQL (java:comp/env/jdbc/PostgresDS) -->
+	<Resource name="jdbc/PostgresDS"
+			  auth="Container"
+			  type="javax.sql.DataSource"
+			  factory="org.apache.tomcat.jdbc.pool.DataSourceFactory"
+			  driverClassName="org.postgresql.Driver"
+			  url="jdbc:postgresql://localhost:5432/meu_app_db"
+			  username="meu_app_user"
+			  password="meu_app_password"
+			  testOnBorrow="true"
+			  validationQuery="SELECT 1"
+			  initialSize="5"
+			  maxActive="20"
+			  maxIdle="10"
+			  minIdle="2"
+			  removeAbandoned="true"
+			  removeAbandonedTimeout="60"/>
+</Context>

@@ -154,7 +154,7 @@ from urllib.parse import urljoin
 
 # Variáveis globais
 WORKSPACE_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_DIR = os.path.join(WORKSPACE_DIR, "meu-projeto-java")
+PROJECT_DIR = os.path.join(WORKSPACE_DIR, "caracore-hub")
 # Diretório base para servidores de aplicação
 SERVER_DIR = os.path.join(WORKSPACE_DIR, "server")
 # Ajuste conforme solicitado: servidores agora ficam dentro de /server
@@ -338,7 +338,7 @@ def restart_postgres_container(wait_seconds: int = 5) -> bool:
         return False
 
 def ensure_tomcat_running_and_deployed() -> bool:
-    """Garante Tomcat iniciado e WAR implantado como ROOT ou meu-projeto-java."""
+    """Garante Tomcat iniciado e WAR implantado como ROOT ou caracore-hub."""
     # Se não existe Tomcat, tentar baixar/instalar (já há helper de download nas opções 2/3)
     # Aqui apenas iniciamos se possível; para garantir deploy total use opção 2.
     if not os.path.exists(TOMCAT_DIR):
@@ -767,7 +767,7 @@ def deploy_wildfly_war_quick(war_path: str) -> bool:
 
 def detect_wildfly_context_paths() -> list[str]:
     """Detecta possíveis context paths publicados no WildFly baseado nos artefatos em deployments.
-    Retorna uma lista ordenada de contextos como '/', '/meu-projeto-java', etc.
+    Retorna uma lista ordenada de contextos como '/', '/caracore-hub', etc.
     """
     contexts: list[str] = []
     try:
@@ -780,8 +780,8 @@ def detect_wildfly_context_paths() -> list[str]:
             contexts.append("/")
         # Demais .war implantados
         war_names = [f for f in files if f.lower().endswith(".war")]
-        # Priorizar 'meu-projeto-java.war' se existir
-        war_names_sorted = sorted(war_names, key=lambda n: (0 if n.startswith("meu-projeto-java") else 1, n.lower()))
+        # Priorizar 'caracore-hub.war' se existir
+        war_names_sorted = sorted(war_names, key=lambda n: (0 if n.startswith("caracore-hub") else 1, n.lower()))
         for war in war_names_sorted:
             base = war[:-4]
             if base.upper() == "ROOT":
@@ -1810,7 +1810,7 @@ def diagnose_wildfly_issues(env=None):
         deployment_files = os.listdir(deployments_dir)
         
         for file in deployment_files:
-            if file.startswith("meu-projeto-java"):
+            if file.startswith("caracore-hub"):
                 if file.endswith(".war"):
                     print(f"{Colors.YELLOW}Arquivo WAR: {file}{Colors.END}")
                 if file.endswith(".deployed"):
@@ -2899,7 +2899,7 @@ def check_environment():
         tomcat_running = check_server_running(TOMCAT_PORT)
         if tomcat_running:
             log(f"Servidor Tomcat está em execução na porta {TOMCAT_PORT}", "SUCCESS")
-            log(f"Aplicação disponível em: http://localhost:{TOMCAT_PORT}/meu-projeto-java/", "SUCCESS")
+            log(f"Aplicação disponível em: http://localhost:{TOMCAT_PORT}/caracore-hub/", "SUCCESS")
         else:
             log(f"Servidor Tomcat não está em execução na porta {TOMCAT_PORT}", "WARNING")
     else:
@@ -2920,7 +2920,7 @@ def check_environment():
         wildfly_running = check_server_running(WILDFLY_PORT)
         if wildfly_running:
             log(f"Servidor WildFly está em execução na porta {WILDFLY_PORT}", "SUCCESS")
-            log(f"Aplicação disponível em: http://localhost:{WILDFLY_PORT}/meu-projeto-java/", "SUCCESS")
+            log(f"Aplicação disponível em: http://localhost:{WILDFLY_PORT}/caracore-hub/", "SUCCESS")
         else:
             log(f"Servidor WildFly não está em execução na porta {WILDFLY_PORT}. Precisa esta online para deploy.", "INFO")
             # Não iniciamos o WildFly automaticamente aqui, apenas na operação de deploy
@@ -3255,8 +3255,8 @@ def start_tomcat_server():
             if process.poll() is None:
                 log(f"Servidor Tomcat iniciado com sucesso via plugin Maven (PID: {process.pid})", "SUCCESS")
                 # Exibir link da aplicação
-                print(f"\n{Colors.GREEN}Aplicação disponível em: http://localhost:{TOMCAT_PORT}/meu-projeto-java/{Colors.END}")
-                log(f"Aplicação disponível em: http://localhost:{TOMCAT_PORT}/meu-projeto-java/", "SUCCESS")
+                print(f"\n{Colors.GREEN}Aplicação disponível em: http://localhost:{TOMCAT_PORT}/caracore-hub/{Colors.END}")
+                log(f"Aplicação disponível em: http://localhost:{TOMCAT_PORT}/caracore-hub/", "SUCCESS")
                 return {
                     "success": True,
                     "process": process,
@@ -3320,7 +3320,7 @@ def start_tomcat_server():
                     process = subprocess.Popen(cmd, cwd=bin_dir)
 
                 print(f"{Colors.CYAN}Tomcat em execução no foreground. Pressione Ctrl+C para parar.{Colors.END}")
-                print(f"{Colors.GREEN}Aplicação: http://localhost:{TOMCAT_PORT}/meu-projeto-java/{Colors.END}")
+                print(f"{Colors.GREEN}Aplicação: http://localhost:{TOMCAT_PORT}/caracore-hub/{Colors.END}")
                 process.wait()
                 log("Tomcat finalizado.", "INFO")
                 return {
@@ -3525,8 +3525,8 @@ def start_wildfly_server():
             if process.poll() is None:
                 log(f"Servidor WildFly iniciado com sucesso via plugin Maven (PID: {process.pid})", "SUCCESS")
                 # Exibir link da aplicação
-                print(f"\n{Colors.GREEN}Aplicação disponível em: http://localhost:{WILDFLY_PORT}/meu-projeto-java/{Colors.END}")
-                log(f"Aplicação disponível em: http://localhost:{WILDFLY_PORT}/meu-projeto-java/", "SUCCESS")
+                print(f"\n{Colors.GREEN}Aplicação disponível em: http://localhost:{WILDFLY_PORT}/caracore-hub/{Colors.END}")
+                log(f"Aplicação disponível em: http://localhost:{WILDFLY_PORT}/caracore-hub/", "SUCCESS")
                 return {
                     "success": True,
                     "process": process,
@@ -3595,8 +3595,8 @@ def start_wildfly_server():
             # então vamos assumir que se o script não falhou, o WildFly está rodando
             log("WildFly Standalone inicializado com sucesso.", "SUCCESS")
             # Exibir link da aplicação
-            print(f"\n{Colors.GREEN}Aplicação disponível em: http://localhost:{WILDFLY_PORT}/meu-projeto-java/{Colors.END}")
-            log(f"Aplicação disponível em: http://localhost:{WILDFLY_PORT}/meu-projeto-java/", "SUCCESS")
+            print(f"\n{Colors.GREEN}Aplicação disponível em: http://localhost:{WILDFLY_PORT}/caracore-hub/{Colors.END}")
+            log(f"Aplicação disponível em: http://localhost:{WILDFLY_PORT}/caracore-hub/", "SUCCESS")
             return {
                 "success": True,
                 "process": process,
@@ -3613,8 +3613,8 @@ def start_wildfly_server():
         if process.poll() is None:
             log(f"Servidor WildFly iniciado com sucesso (método padrão) (PID: {process.pid})", "SUCCESS")
             # Exibir link da aplicação
-            print(f"\n{Colors.GREEN}Aplicação disponível em: http://localhost:{WILDFLY_PORT}/meu-projeto-java/{Colors.END}")
-            log(f"Aplicação disponível em: http://localhost:{WILDFLY_PORT}/meu-projeto-java/", "SUCCESS")
+            print(f"\n{Colors.GREEN}Aplicação disponível em: http://localhost:{WILDFLY_PORT}/caracore-hub/{Colors.END}")
+            log(f"Aplicação disponível em: http://localhost:{WILDFLY_PORT}/caracore-hub/", "SUCCESS")
             return {
                 "success": True,
                 "process": process,
@@ -4247,7 +4247,7 @@ def main():
                 
                 # Limpar deployments anteriores (mesmo se o servidor não estiver rodando)
                 log("Limpando deployments anteriores...", "INFO")
-                for item in ["meu-projeto-java", "meu-projeto-java.war", "ROOT", "ROOT.war"]:
+                for item in ["caracore-hub", "caracore-hub.war", "ROOT", "ROOT.war"]:
                     item_path = os.path.join(tomcat_webapps, item)
                     if os.path.exists(item_path):
                         if os.path.isdir(item_path):
@@ -4273,7 +4273,7 @@ def main():
                                         return False
                                     process = subprocess.Popen([catalina, "run"], cwd=bin_dir)
                                 print(f"{Colors.CYAN}Tomcat em execução no foreground. Pressione Ctrl+C para parar.{Colors.END}")
-                                print(f"{Colors.GREEN}Aplicação: http://localhost:{TOMCAT_PORT}/meu-projeto-java/{Colors.END}")
+                                print(f"{Colors.GREEN}Aplicação: http://localhost:{TOMCAT_PORT}/caracore-hub/{Colors.END}")
                                 process.wait()
                                 log("Tomcat finalizado.", "INFO")
                             except KeyboardInterrupt:
@@ -4287,7 +4287,7 @@ def main():
                                     pass
                 
                 # Copiar o WAR para o Tomcat
-                war_dest = os.path.join(tomcat_webapps, "meu-projeto-java.war")
+                war_dest = os.path.join(tomcat_webapps, "caracore-hub.war")
                 shutil.copy2(war_file, war_dest)
                 log(f"Arquivo WAR copiado para Tomcat: {war_dest}", "SUCCESS")
                 
@@ -4303,7 +4303,7 @@ def main():
                         cmd = [os.path.join(bin_dir, "catalina.sh"), "run"]
                         tomcat_process = subprocess.Popen(cmd, cwd=bin_dir)
                     print(f"{Colors.CYAN}Tomcat em execução no foreground. Pressione Ctrl+C para parar.{Colors.END}")
-                    print(f"{Colors.GREEN}Aplicação: http://localhost:{TOMCAT_PORT}/meu-projeto-java/{Colors.END}")
+                    print(f"{Colors.GREEN}Aplicação: http://localhost:{TOMCAT_PORT}/caracore-hub/{Colors.END}")
                     tomcat_process.wait()
                     log("Tomcat finalizado.", "INFO")
                 except KeyboardInterrupt:
@@ -4375,8 +4375,8 @@ def main():
                         log("Não foi possível verificar o status final do Tomcat.", "WARNING")
                 
                 # Exibir link da aplicação
-                print(f"\n{Colors.GREEN}Aplicação disponível em: http://localhost:{TOMCAT_PORT}/meu-projeto-java/{Colors.END}")
-                log(f"Aplicação disponível em: http://localhost:{TOMCAT_PORT}/meu-projeto-java/", "SUCCESS")
+                print(f"\n{Colors.GREEN}Aplicação disponível em: http://localhost:{TOMCAT_PORT}/caracore-hub/{Colors.END}")
+                log(f"Aplicação disponível em: http://localhost:{TOMCAT_PORT}/caracore-hub/", "SUCCESS")
             else:
                 log(f"Tomcat não encontrado em: {TOMCAT_DIR}", "ERROR")
                 log("Instale o Tomcat ou corrija o caminho no script.", "ERROR")
@@ -4385,7 +4385,7 @@ def main():
             print(f"\n{Colors.GREEN}{'=' * 60}{Colors.END}")
             print(f"{Colors.GREEN}DEPLOY NO TOMCAT CONCLUÍDO COM SUCESSO!{Colors.END}")
             print(f"{Colors.GREEN}Processo realizado: Undeploy -> Deploy -> Reinicialização{Colors.END}")
-            print(f"{Colors.GREEN}Acesse a aplicação em: http://localhost:{TOMCAT_PORT}/meu-projeto-java/{Colors.END}")
+            print(f"{Colors.GREEN}Acesse a aplicação em: http://localhost:{TOMCAT_PORT}/caracore-hub/{Colors.END}")
             print(f"{Colors.GREEN}{'=' * 60}{Colors.END}")
             
             if not NON_INTERACTIVE:
@@ -4398,7 +4398,7 @@ def main():
             tomcat_running = check_server_running(TOMCAT_PORT)
             if tomcat_running:
                 log(f"Servidor Tomcat já está em execução na porta {TOMCAT_PORT}", "SUCCESS")
-                log(f"Aplicação disponível em: http://localhost:{TOMCAT_PORT}/meu-projeto-java/", "SUCCESS")
+                log(f"Aplicação disponível em: http://localhost:{TOMCAT_PORT}/caracore-hub/", "SUCCESS")
                 if not NON_INTERACTIVE:
                     input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
                 continue
@@ -4426,7 +4426,7 @@ def main():
                         tomcat_started = check_server_running(TOMCAT_PORT)
                         if tomcat_started:
                             log("Tomcat iniciado com sucesso", "SUCCESS")
-                            log(f"Aplicação disponível em: http://localhost:{TOMCAT_PORT}/meu-projeto-java/ (se existir)", "SUCCESS")
+                            log(f"Aplicação disponível em: http://localhost:{TOMCAT_PORT}/caracore-hub/ (se existir)", "SUCCESS")
                         else:
                             log("Tomcat pode não ter iniciado corretamente", "WARNING")
                             diagnose_tomcat_issues(tomcat_env)
@@ -4445,7 +4445,7 @@ def main():
                         tomcat_started = check_server_running(TOMCAT_PORT)
                         if tomcat_started:
                             log("Tomcat iniciado com sucesso", "SUCCESS")
-                            log(f"Aplicação disponível em: http://localhost:{TOMCAT_PORT}/meu-projeto-java/ (se existir)", "SUCCESS")
+                            log(f"Aplicação disponível em: http://localhost:{TOMCAT_PORT}/caracore-hub/ (se existir)", "SUCCESS")
                         else:
                             log("Tomcat pode não ter iniciado corretamente", "WARNING")
                             diagnose_tomcat_issues(tomcat_env)
@@ -4614,19 +4614,19 @@ def main():
                     os.makedirs(deployments_dir)
                 
                 # Limpar deployments anteriores
-                for pattern in ["ROOT.war*", "meu-projeto-java.war*"]:
+                for pattern in ["ROOT.war*", "caracore-hub.war*"]:
                     for item_path in glob.glob(os.path.join(deployments_dir, pattern)):
                         if os.path.exists(item_path):
                             os.remove(item_path)
                             log(f"Arquivo {os.path.basename(item_path)} removido do WildFly", "INFO")
                 
                 # Copiar o WAR para o WildFly
-                war_dest = os.path.join(deployments_dir, "meu-projeto-java.war")
+                war_dest = os.path.join(deployments_dir, "caracore-hub.war")
                 shutil.copy2(war_file, war_dest)
                 log(f"Arquivo WAR copiado para WildFly: {war_dest}", "SUCCESS")
                 
                 # Criar arquivo .dodeploy
-                with open(os.path.join(deployments_dir, "meu-projeto-java.war.dodeploy"), 'w') as f:
+                with open(os.path.join(deployments_dir, "caracore-hub.war.dodeploy"), 'w') as f:
                     pass
                 log("Arquivo marcador .dodeploy criado para o WildFly", "INFO")
                 
@@ -4687,8 +4687,8 @@ def main():
                         log("Não foi possível verificar o status final do WildFly.", "WARNING")
                 
                 # Exibir link da aplicação
-                print(f"\n{Colors.GREEN}Aplicação disponível em: http://localhost:{WILDFLY_PORT}/meu-projeto-java/{Colors.END}")
-                log(f"Aplicação disponível em: http://localhost:{WILDFLY_PORT}/meu-projeto-java/", "SUCCESS")
+                print(f"\n{Colors.GREEN}Aplicação disponível em: http://localhost:{WILDFLY_PORT}/caracore-hub/{Colors.END}")
+                log(f"Aplicação disponível em: http://localhost:{WILDFLY_PORT}/caracore-hub/", "SUCCESS")
             else:
                 log(f"WildFly não encontrado em: {WILDFLY_DIR}", "ERROR")
                 log("Instale o WildFly ou corrija o caminho no script.", "ERROR")
@@ -4700,7 +4700,7 @@ def main():
                 print(f"{Colors.GREEN}Processo realizado: Deploy a quente sem reinicialização{Colors.END}")
             else:
                 print(f"{Colors.GREEN}Processo realizado: Inicialização do servidor + Deploy{Colors.END}")
-            print(f"{Colors.GREEN}Acesse a aplicação em: http://localhost:{WILDFLY_PORT}/meu-projeto-java/{Colors.END}")
+            print(f"{Colors.GREEN}Acesse a aplicação em: http://localhost:{WILDFLY_PORT}/caracore-hub/{Colors.END}")
             print(f"{Colors.GREEN}{'=' * 60}{Colors.END}")
             
             if not NON_INTERACTIVE:
@@ -4722,7 +4722,7 @@ def main():
             wildfly_running = check_server_running(WILDFLY_PORT)
             if wildfly_running:
                 log(f"Servidor WildFly já está em execução na porta {WILDFLY_PORT}", "SUCCESS")
-                log(f"Aplicação disponível em: http://localhost:{WILDFLY_PORT}/meu-projeto-java/", "SUCCESS")
+                log(f"Aplicação disponível em: http://localhost:{WILDFLY_PORT}/caracore-hub/", "SUCCESS")
                 input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
                 continue
             
@@ -4747,7 +4747,7 @@ def main():
                         wildfly_started = check_server_running(WILDFLY_PORT)
                         if wildfly_started:
                             log("WildFly iniciado com sucesso", "SUCCESS")
-                            log(f"Aplicação disponível em: http://localhost:{WILDFLY_PORT}/meu-projeto-java/ (se existir)", "SUCCESS")
+                            log(f"Aplicação disponível em: http://localhost:{WILDFLY_PORT}/caracore-hub/ (se existir)", "SUCCESS")
                         else:
                             log("WildFly pode não ter iniciado completamente. Verificando problemas...", "WARNING")
                             diagnose_wildfly_issues(wildfly_env)
@@ -4767,7 +4767,7 @@ def main():
                         wildfly_started = check_server_running(WILDFLY_PORT)
                         if wildfly_started:
                             log("WildFly iniciado com sucesso", "SUCCESS")
-                            log(f"Aplicação disponível em: http://localhost:{WILDFLY_PORT}/meu-projeto-java/ (se existir)", "SUCCESS")
+                            log(f"Aplicação disponível em: http://localhost:{WILDFLY_PORT}/caracore-hub/ (se existir)", "SUCCESS")
                         else:
                             log("WildFly pode não ter iniciado completamente. Verificando problemas...", "WARNING")
                             diagnose_wildfly_issues(wildfly_env)
@@ -5074,7 +5074,7 @@ def main():
                         if ok_nav and ok_url:
                             log(f"WildFly: validação via navegador OK para URL {ok_url}.", "SUCCESS")
                         else:
-                            log("WildFly: navegador não validou as URLs de login testadas (/login e /meu-projeto-java/login).", "WARNING")
+                            log("WildFly: navegador não validou as URLs de login testadas (/login e /caracore-hub/login).", "WARNING")
                 except Exception as _e:
                     log(f"WildFly: não foi possível validar via navegador a URL /login: {_e}", "WARNING")
 
@@ -5092,7 +5092,7 @@ def main():
                 if not ok_browser:
                     log("Tentando fallback HTTP para Tomcat...", "WARNING")
                     if try_logins_for(base):
-                        log("Login no Tomcat validado via HTTP (ROOT ou /meu-projeto-java/).", "SUCCESS")
+                        log("Login no Tomcat validado via HTTP (ROOT ou /caracore-hub/).", "SUCCESS")
                     else:
                         log("Falha ao validar login no Tomcat (browser e HTTP).", "ERROR")
                 else:
