@@ -21,8 +21,17 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 public class PedidoService {
-    private final PedidoDAO pedidoDAO = new PedidoDAO();
-    private final PosicaoDAO posicaoDAO = new PosicaoDAO();
+    private final PedidoDAO pedidoDAO;
+    private final PosicaoDAO posicaoDAO;
+
+    public PedidoService() {
+        this(new PedidoDAO(), new PosicaoDAO());
+    }
+
+    PedidoService(PedidoDAO pedidoDAO, PosicaoDAO posicaoDAO) {
+        this.pedidoDAO = pedidoDAO;
+        this.posicaoDAO = posicaoDAO;
+    }
 
     public Pedido registrarPedidoManual(Pedido pedido, List<Volume> volumes, String actor) {
         if (volumes == null || volumes.isEmpty()) {

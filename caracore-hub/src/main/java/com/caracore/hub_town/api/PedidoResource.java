@@ -26,7 +26,15 @@ import java.util.stream.Collectors;
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 public class PedidoResource {
-    private final PedidoService pedidoService = new PedidoService();
+    private final PedidoService pedidoService;
+
+    public PedidoResource() {
+        this(new PedidoService());
+    }
+
+    PedidoResource(PedidoService pedidoService) {
+        this.pedidoService = pedidoService;
+    }
 
     @POST
     public Response criarPedido(PedidoCreateRequest request) {
