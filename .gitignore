@@ -127,3 +127,5 @@ Thumbs.db
 # Docker
 docker/data/
 docker/volumes/
+# Local wrappers
+__temp_main_tom.py
