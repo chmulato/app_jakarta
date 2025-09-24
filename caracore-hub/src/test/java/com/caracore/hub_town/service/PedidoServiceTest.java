@@ -175,6 +175,26 @@ class PedidoServiceTest {
     }
 
     @Test
+    void registrarRetirada_quandoPedidoNaoExiste_lancaEntityNotFound() throws Exception {
+        EntityManager em = org.mockito.Mockito.mock(EntityManager.class);
+        when(em.find(Pedido.class, 55L)).thenReturn(null);
+
+        try (MockedStatic<JPAUtil> mocked = org.mockito.Mockito.mockStatic(JPAUtil.class)) {
+            mocked.when(() -> JPAUtil.executeInTransaction(any(JPAUtil.TransactionCallback.class)))
+                .thenAnswer(invocation -> {
+                    JPAUtil.TransactionCallback<?> callback = invocation.getArgument(0);
+                    return callback.execute(em);
+                });
+
+            assertThatThrownBy(() -> service.registrarRetirada(55L, "cli"))
+                .isInstanceOf(EntityNotFoundException.class)
+                .hasMessageContaining("Pedido");
+
+            verify(em, never()).merge(any(Pedido.class));
+        }
+    }
+
+    @Test
     void atualizarPosicao_quandoPosicaoInformada_atualizaVolumeEPosicao() throws Exception {
         Pedido pedido = buildPedidoBase();
         Volume volume = new Volume();
@@ -208,6 +228,26 @@ class PedidoServiceTest {
             assertThat(pedido.getEventos())
                 .extracting(EventoPedido::getTipo)
                 .contains(TipoEvento.ALOCACAO);
+        }
+    }
+
+    @Test
+    void atualizarPosicao_quandoVolumeNaoExiste_lancaEntityNotFound() throws Exception {
+        EntityManager em = org.mockito.Mockito.mock(EntityManager.class);
+        when(em.find(Volume.class, 88L)).thenReturn(null);
+
+        try (MockedStatic<JPAUtil> mocked = org.mockito.Mockito.mockStatic(JPAUtil.class)) {
+            mocked.when(() -> JPAUtil.executeInTransaction(any(JPAUtil.TransactionCallback.class)))
+                .thenAnswer(invocation -> {
+                    JPAUtil.TransactionCallback<?> callback = invocation.getArgument(0);
+                    return callback.execute(em);
+                });
+
+            assertThatThrownBy(() -> service.atualizarPosicao(88L, 10L, "cli"))
+                .isInstanceOf(EntityNotFoundException.class)
+                .hasMessageContaining("Volume");
+
+            verify(em, never()).merge(any(Volume.class));
         }
     }
 
