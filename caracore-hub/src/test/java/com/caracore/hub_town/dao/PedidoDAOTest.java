@@ -3,6 +3,7 @@ package com.caracore.hub_town.dao;
 import com.caracore.hub_town.model.CanalPedido;
 import com.caracore.hub_town.model.Pedido;
 import com.caracore.hub_town.model.PedidoStatus;
+import com.caracore.hub_town.model.EventoPedido;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.TypedQuery;
 import org.junit.jupiter.api.Test;
@@ -14,14 +15,15 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -75,9 +77,11 @@ class PedidoDAOTest {
     }
 
     @Test
-    void buscarPorCodigo_retornaOptionalQuandoEncontrado() {
+    void buscarPorCodigo_retornaOptionalEInicializaEventos() {
         when(entityManager.createQuery(any(String.class), eq(Pedido.class))).thenReturn(pedidoQuery);
-        Pedido pedido = new Pedido();
+        Pedido pedido = spy(new Pedido());
+        List<EventoPedido> eventosSpy = spy(new ArrayList<>());
+        when(pedido.getEventos()).thenReturn(eventosSpy);
         when(pedidoQuery.getResultList()).thenReturn(List.of(pedido));
 
         try (MockedStatic<JPAUtil> mocked = org.mockito.Mockito.mockStatic(JPAUtil.class)) {
@@ -86,6 +90,28 @@ class PedidoDAOTest {
             Optional<Pedido> resultado = dao.buscarPorCodigo("PED-1");
 
             assertThat(resultado).contains(pedido);
+            verify(eventosSpy).size();
+            verify(entityManager).close();
+        }
+    }
+
+
+    @Test
+    void buscarPorTelefone_inicializaEventosParaResultados() {
+        when(entityManager.createQuery(any(String.class), eq(Pedido.class))).thenReturn(pedidoQuery);
+        when(pedidoQuery.setParameter(any(String.class), any())).thenReturn(pedidoQuery);
+        Pedido pedido = spy(new Pedido());
+        List<EventoPedido> eventosSpy = spy(new ArrayList<>());
+        when(pedido.getEventos()).thenReturn(eventosSpy);
+        when(pedidoQuery.getResultList()).thenReturn(List.of(pedido));
+
+        try (MockedStatic<JPAUtil> mocked = org.mockito.Mockito.mockStatic(JPAUtil.class)) {
+            mocked.when(JPAUtil::getEntityManager).thenReturn(entityManager);
+
+            List<Pedido> pedidos = dao.buscarPorTelefone("9999");
+
+            assertThat(pedidos).containsExactly(pedido);
+            verify(eventosSpy).size();
             verify(entityManager).close();
         }
     }

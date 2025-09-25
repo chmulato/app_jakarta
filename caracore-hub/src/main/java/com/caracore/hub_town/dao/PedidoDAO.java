@@ -27,13 +27,15 @@ public class PedidoDAO {
         try {
             TypedQuery<Pedido> query = em.createQuery(
                 "SELECT DISTINCT p FROM Pedido p " +
-                    "LEFT JOIN FETCH p.volumes " +
-                    "LEFT JOIN FETCH p.eventos " +
-                    "WHERE p.id = :id",
+                    "LEFT JOIN FETCH p.volumes " + "WHERE p.id = :id",
                 Pedido.class);
             query.setParameter("id", id);
             List<Pedido> result = query.getResultList();
-            return result.isEmpty() ? Optional.empty() : Optional.of(result.get(0));
+            initializeEventos(result);
+            if (result.isEmpty()) {
+                return Optional.empty();
+            }
+            return Optional.of(result.get(0));
         } finally {
             em.close();
         }
@@ -44,13 +46,15 @@ public class PedidoDAO {
         try {
             TypedQuery<Pedido> query = em.createQuery(
                 "SELECT DISTINCT p FROM Pedido p " +
-                    "LEFT JOIN FETCH p.volumes " +
-                    "LEFT JOIN FETCH p.eventos " +
-                    "WHERE p.codigo = :codigo",
+                    "LEFT JOIN FETCH p.volumes " + "WHERE p.codigo = :codigo",
                 Pedido.class);
             query.setParameter("codigo", codigo);
             List<Pedido> result = query.getResultList();
-            return result.isEmpty() ? Optional.empty() : Optional.of(result.get(0));
+            initializeEventos(result);
+            if (result.isEmpty()) {
+                return Optional.empty();
+            }
+            return Optional.of(result.get(0));
         } finally {
             em.close();
         }
@@ -104,12 +108,12 @@ public class PedidoDAO {
         try {
             TypedQuery<Pedido> query = em.createQuery(
                 "SELECT DISTINCT p FROM Pedido p " +
-                    "LEFT JOIN FETCH p.volumes " +
-                    "LEFT JOIN FETCH p.eventos " +
-                    "WHERE p.destinatarioTelefone LIKE :telefone",
+                    "LEFT JOIN FETCH p.volumes " + "WHERE p.destinatarioTelefone LIKE :telefone",
                 Pedido.class);
             query.setParameter("telefone", "%" + telefone + "%");
-            return query.getResultList();
+            List<Pedido> result = query.getResultList();
+            initializeEventos(result);
+            return result;
         } finally {
             em.close();
         }
@@ -159,6 +163,13 @@ public class PedidoDAO {
             em.close();
         }
     }
+
+    private void initializeEventos(List<Pedido> pedidos) {
+        for (Pedido pedido : pedidos) {
+            pedido.getEventos().size();
+        }
+    }
+
 
     public void atualizarStatus(Long pedidoId, PedidoStatus status) {
         JPAUtil.executeInTransaction(em -> {
