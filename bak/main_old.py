@@ -1076,7 +1076,7 @@ def ensure_admin_seed(email: str = "admin@meuapp.com", senha: str = "Admin@123")
                     email VARCHAR(150) UNIQUE NOT NULL,
                     senha VARCHAR(255) NOT NULL,
                     ativo BOOLEAN DEFAULT true,
-                    perfil VARCHAR(20) DEFAULT 'USUARIO' CHECK (perfil IN ('ADMIN','USUARIO')),
+                    perfil VARCHAR(20) DEFAULT 'OPERADOR' CHECK (perfil IN ('ADMIN','SUPERVISOR','OPERADOR')),
                     data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     data_atualizacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )

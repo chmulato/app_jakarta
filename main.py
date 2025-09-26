@@ -1076,7 +1076,7 @@ def ensure_admin_seed(email: str = "admin@meuapp.com", senha: str = "Admin@123")
                     email VARCHAR(150) UNIQUE NOT NULL,
                     senha VARCHAR(255) NOT NULL,
                     ativo BOOLEAN DEFAULT true,
-                    perfil VARCHAR(20) DEFAULT 'USUARIO' CHECK (perfil IN ('ADMIN','USUARIO')),
+                    perfil VARCHAR(20) DEFAULT 'OPERADOR' CHECK (perfil IN ('ADMIN','SUPERVISOR','OPERADOR')),
                     data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     data_atualizacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -4214,6 +4214,7 @@ def main():
                     log("Datasource PostgreSQL pronto no Tomcat.", "SUCCESS")
                 else:
                     log("Não foi possível garantir o datasource PostgreSQL no Tomcat.", "WARNING")
+                tomcat_env = setup_tomcat_environment(TOMCAT_DIR)
                 
                 tomcat_webapps = os.path.join(TOMCAT_DIR, "webapps")
                 if not os.path.exists(tomcat_webapps):
@@ -4298,10 +4299,10 @@ def main():
                 try:
                     if platform.system() == "Windows":
                         cmd = f'"{os.path.join(bin_dir, "catalina.bat")}" run'
-                        tomcat_process = subprocess.Popen(cmd, shell=True, cwd=bin_dir)
+                        tomcat_process = subprocess.Popen(cmd, shell=True, cwd=bin_dir, env=tomcat_env)
                     else:
                         cmd = [os.path.join(bin_dir, "catalina.sh"), "run"]
-                        tomcat_process = subprocess.Popen(cmd, cwd=bin_dir)
+                        tomcat_process = subprocess.Popen(cmd, cwd=bin_dir, env=tomcat_env)
                     print(f"{Colors.CYAN}Tomcat em execução no foreground. Pressione Ctrl+C para parar.{Colors.END}")
                     print(f"{Colors.GREEN}Aplicação: http://localhost:{TOMCAT_PORT}/caracore-hub/{Colors.END}")
                     tomcat_process.wait()

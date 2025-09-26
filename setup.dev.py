@@ -1028,7 +1028,7 @@ def create_missing_tables(args, create_usuarios=False, create_produtos=False):
         nome VARCHAR(100) NOT NULL,
         email VARCHAR(100) NOT NULL UNIQUE,
         senha VARCHAR(100) NOT NULL,
-        perfil VARCHAR(20) DEFAULT 'USUARIO' CHECK (perfil IN ('ADMIN','USUARIO')),
+        perfil VARCHAR(20) DEFAULT 'OPERADOR' CHECK (perfil IN ('ADMIN','SUPERVISOR','OPERADOR')),
         data_criacao TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     );
     """
@@ -1173,7 +1173,7 @@ def ensure_admin(args):
         
         if not has_perfil:
             warn("Coluna 'perfil' ausente. Aplicando migração leve (ALTER TABLE).", args)
-            cp_alter = run_cmd(["docker", "exec", POSTGRES_CONTAINER, "psql", "-U", POSTGRES_USER, "-d", POSTGRES_DB, "-c", "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS perfil VARCHAR(20) DEFAULT 'USUARIO' CHECK (perfil IN ('ADMIN','USUARIO'));" ])
+            cp_alter = run_cmd(["docker", "exec", POSTGRES_CONTAINER, "psql", "-U", POSTGRES_USER, "-d", POSTGRES_DB, "-c", "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS perfil VARCHAR(20) DEFAULT 'OPERADOR' CHECK (perfil IN ('ADMIN','SUPERVISOR','OPERADOR'));" ])
             if cp_alter.returncode != 0:
                 err("Falha ao adicionar coluna perfil.", args)
                 return
@@ -1208,7 +1208,7 @@ def ensure_admin(args):
                 return
         
         # Atualizar outros admins para usuários comuns
-        update_sql = f"UPDATE usuarios SET perfil='USUARIO' WHERE perfil='ADMIN' AND email!='{ADMIN_EMAIL}';"
+        update_sql = f"UPDATE usuarios SET perfil='OPERADOR' WHERE perfil='ADMIN' AND email!='{ADMIN_EMAIL}';"
         cp_upd = run_cmd(["docker", "exec", POSTGRES_CONTAINER, "psql", "-U", POSTGRES_USER, "-d", POSTGRES_DB, "-c", update_sql])
         if cp_upd.returncode == 0:
             ok("Convertidos outros administradores para usuários comuns.", args)

@@ -135,9 +135,8 @@ Padrões importantes:
 
 Usuários padrão criados no primeiro start (hash BCrypt de `Admin@123`):
 - admin@meuapp.com (ADMIN)
-- admin@exemplo.com (ADMIN)
-- joao@exemplo.com (USUARIO)
-- maria@exemplo.com (USUARIO)
+- supervisor@meuapp.com (SUPERVISOR)
+- operador01@meuapp.com (OPERADOR)
 
 Validação do hash do admin (instala `bcrypt` se faltar):
 ```powershell
@@ -265,14 +264,18 @@ Documentação adicional: `doc/DEPLOY.md`, `doc/ARQUITETURA.md`, `doc/RESULTADOS
 ### Estrutura (resumo)
 ```
 app_jakarta/
- ├─ main.py
- ├─ docker-compose.yml
- ├─ docker/
- │   └─ postgres/init/01-init.sql
- ├─ caracore-hub/
- │   └─ pom.xml, src/
- ├─ server/ (criado se Tomcat/WildFly standalone forem usados)
- └─ log/ (maven_deploy.log)
+ |- main.py
+ |- docker-compose.yml
+ |- docker/
+ |  \- postgres/init/01-init.sql
+ |- caracore-hub/
+ |  |- pom.xml (parent multi-modulo)
+ |  |- core/ (modelos, PdfService)
+ |  |- persistence/ (DAO, JPA, servicos)
+ |  |- api/ (JAX-RS)
+ |  \- web/ (WAR, servlets, JSP)
+ |- server/ (gerado ao preparar Tomcat/WildFly standalone)
+ \- log/ (maven_deploy.log)
 ```
 
 ### Testar login (Tomcat e WildFly)
@@ -287,7 +290,7 @@ Tomcat (porta 9090)
 2) Abra: http://localhost:9090/caracore-hub
 3) Faça login com:
   - admin@meuapp.com / Admin@123 (ADMIN)
-  - joao@exemplo.com / Admin@123 (USUARIO)
+  - supervisor@meuapp.com / Admin@123 (SUPERVISOR)
 
 WildFly (porta 8080)
 1) Configure o datasource de Postgres pelo `main.py` (gera `standalone.xml` a partir do template e garante o driver JDBC).
