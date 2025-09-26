@@ -16,6 +16,6 @@ Documentos PDF
 - [x] PdfService com geracao de etiqueta e comprovante usando PDFBox.
 
 Testes Python
-- [ ] Suite pytest (tests/test_auth.py, tests/test_pedidos.py, etc.) continua ausente.
+- [x] Suite pytest (tests/fase_01/test_autenticacao.py, tests/fase_01/test_fluxo_pedidos.py) criada.
 
 
