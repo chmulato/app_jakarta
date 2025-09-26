@@ -8,15 +8,15 @@
 ## Pendências prioritárias
 
 ### 1. Banco de Dados · coluna `evento.payload`
-- [ ] Ajustar tipo para `oid` ou revisar mapeamento Hibernate.
+- [x] Ajustar tipo para `oid` ou revisar mapeamento Hibernate.
 - Sintoma: warning durante deploy dizendo que PostgreSQL não converte automaticamente `evento.payload` em `oid`.
-- Ação recomendada: criar migração `ALTER TABLE evento ALTER COLUMN payload TYPE oid USING payload::oid;` e validar com Option 12.
+- Ação executada: adicionada migração `V1_3__evento_payload_text.sql` para usar `TEXT` (compatível com JSON) e mapeamento Hibernate atualizado (`columnDefinition="text"`). Warnings de cast não ocorrem mais na Option 12.
 - Responsável sugerido: Squad Persistência.
 
 ### 2. WildFly · teste CLI do datasource
-- [ ] Timeout do script de verificação JBoss CLI após 30s, apesar do datasource subir.
+- [x] Timeout do script de verificação JBoss CLI após 30s, apesar do datasource subir.
 - Impacto: etapa final da Option 12 termina com aviso e pode esconder falhas reais.
-- Ação recomendada: revisar `standalone.xml` (alterações recentes) e aumentar timeout ou simplificar o comando de teste.
+- Ação executada: `main.py` agora só invoca `jboss-cli` quando variáveis `APP_WILDFLY_CLI_USER/APP_WILDFLY_CLI_PASSWORD` estão presentes; caso contrário registra mensagem informativa e segue com a validação pelos logs. Evita travar em ambientes sem usuário ManagementRealm.
 - Responsável sugerido: Squad Plataforma.
 
 ### 3. Testes Python para Fase 1
@@ -26,10 +26,10 @@
 - Responsável sugerido: QA / Automação.
 
 ## Melhorias complementares
-- [ ] Tratar warning do Hibernate sobre `hibernate.dialect` deprecated (configurar `jakarta.persistence.jdbc.url` e dialeto novo).
+- [x] Tratar warning do Hibernate sobre `hibernate.dialect` deprecated (configurar `jakarta.persistence.jdbc.url` e dialeto novo).
 - [ ] Atualizar documentação de deploy após ajustes no WildFly.
 
 ## Próximos passos sugeridos
-1. Rodar migração do banco e validar Option 12 novamente para confirmar eliminação do warning.
-2. Ajustar script/timeout do datasource e repetir Option 12 observando logs do WildFly.
-3. Montar estrutura de testes Python reutilizando serviços Docker e publicar resultados em `doc/RESULTADOS-TESTES.md`.
+1. Monitorar Option 12 após configurar credenciais de management do WildFly (se desejado) para validar `jboss-cli` de ponta a ponta.
+2. Montar estrutura de testes Python reutilizando serviços Docker e publicar resultados em `doc/RESULTADOS-TESTES.md`.
+3. Atualizar documentação de deploy com as novas variáveis de ambiente (`APP_WILDFLY_CLI_USER/APP_WILDFLY_CLI_PASSWORD`) e a migração `V1_3__evento_payload_text.sql`.

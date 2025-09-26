@@ -20,7 +20,7 @@
       <property name="jakarta.persistence.jdbc.password" value=""/>
       
       <!-- Configurações do Hibernate -->
-      <property name="hibernate.dialect" value="org.hibernate.dialect.H2Dialect"/>
+  <property name="jakarta.persistence.jdbc.dialect" value="org.hibernate.dialect.H2Dialect"/>
       <property name="hibernate.hbm2ddl.auto" value="create-drop"/>
       <property name="hibernate.show_sql" value="false"/>
       <property name="hibernate.format_sql" value="false"/>
@@ -41,7 +41,7 @@
     
     <properties>
       <!-- Configurações dinâmicas definidas pelos TestContainers -->
-      <property name="hibernate.dialect" value="org.hibernate.dialect.PostgreSQLDialect"/>
+  <property name="jakarta.persistence.jdbc.dialect" value="org.hibernate.dialect.PostgreSQLDialect"/>
       <property name="hibernate.hbm2ddl.auto" value="create-drop"/>
       <property name="hibernate.show_sql" value="true"/>
       <property name="hibernate.format_sql" value="true"/>

@@ -23,8 +23,8 @@ public class EventoPedido {
     @Column(name = "tipo", nullable = false, length = 32)
     private TipoEvento tipo;
 
-    @Lob
-    @Column(name = "payload")
+    @Basic(fetch = FetchType.LAZY)
+    @Column(name = "payload", columnDefinition = "text")
     private String payload;
 
     @CreationTimestamp
