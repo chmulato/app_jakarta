@@ -7,6 +7,24 @@ Aplicação Java (Jakarta EE) com autenticação, automação de build/deploy vi
 
 —
 
+### Sumário
+- [Visão geral](#visão-geral)
+- [Sequência de scripts (recomendado)](#sequência-de-scripts-recomendado)
+- [Pré‑requisitos](#pré‑requisitos)
+- [Setup rápido (Windows PowerShell)](#setup-rápido-windows-powershell)
+- [Execução (menu Python)](#execução-menu-python)
+- [Execução fim a fim (Opção 12)](#execução-fim-a-fim-opção-12)
+- [Banco de Dados](#banco-de-dados)
+- [Build e testes (Maven)](#build-e-testes-maven)
+- [Deploy](#deploy)
+- [Datasource (PostgreSQL)](#datasource-postgresql)
+- [Variáveis/argumentos úteis](#variáveisargumentos-úteis)
+- [Troubleshooting rápido](#troubleshooting-rápido)
+- [Estrutura (resumo)](#estrutura-resumo)
+- [Testar login (Tomcat e WildFly)](#testar-login-tomcat-e-wildfly)
+- [Documentação essencial](#documentação-essencial)
+- [Licença e suporte](#licença-e-suporte)
+
 ### Visão geral
 ![Visão geral (secundária)](./doc/img/article_ii.png)
 <sub><em>Visão geral do fluxo: banco de dados, build, deploy e validação de login.</em></sub>
@@ -60,6 +78,7 @@ docker --version
 
 —
 
+<a id="readme-setup-rapido"></a>
 ### Setup rápido (Windows PowerShell)
 1) Preparar o ambiente Python (cria venv e instala requirements):
 ```powershell
@@ -86,6 +105,7 @@ python .\main.py
 ```
 
 —
+<a id="readme-execucao-menu"></a>
 ### Execução (menu Python)
 Abra o menu interativo e siga as opções de build/deploy/diagnóstico:
 ```powershell
@@ -104,6 +124,7 @@ python .\main.py --tomcat-dir C:\servers\tomcat10 --wildfly-dir D:\wildfly-37
 Logs do orquestrador: arquivos em `log/*.log`.
 
 —
+<a id="readme-opcao-12"></a>
 ### Execução fim a fim (Opção 12)
 A opção 12 realiza um fluxo completo e não interativo:
 - para Tomcat e WildFly (se estiverem rodando), garantindo estado limpo;
@@ -128,6 +149,7 @@ Padrões importantes:
 
 —
 
+<a id="readme-banco-de-dados"></a>
 ### Banco de Dados
 - Serviço: `postgres` em `docker-compose.yml`
 - Inicialização: scripts em `docker/postgres/init/*.sql`
@@ -145,6 +167,7 @@ python .\setup.dev.py --auto-fix
 
 —
 
+<a id="readme-build-testes"></a>
 ### Build e testes (Maven)
 ```powershell
 cd .\caracore-hub
@@ -159,6 +182,7 @@ mvn -Prun
 ```
 
 —
+<a id="readme-deploy"></a>
 ### Deploy
 Tomcat (recomendado via `main.py`):
 - Empacota WAR, configura `server.xml` para porta 9090 e copia `caracore-hub.war` para `webapps/` do Tomcat standalone.
@@ -184,6 +208,7 @@ WildFly:
 Portas podem ser ajustadas no `main.py` (`TOMCAT_PORT`, `WILDFLY_PORT`) ou nas configurações dos servidores.
 
 —
+<a id="readme-datasource"></a>
 ### Datasource (PostgreSQL)
 - Origem das credenciais: lidas do `docker-compose.yml` (serviço `postgres`) e aplicadas no Tomcat/WildFly.
 - Overrides por ambiente: se definir, as variáveis `APP_DB_HOST`, `APP_DB_PORT`, `APP_DB_NAME`, `APP_DB_USER`, `APP_DB_PASSWORD` têm precedência.
@@ -226,6 +251,7 @@ Observações:
 - `--only-check`: somente validações e saída
 
 —
+<a id="readme-troubleshooting"></a>
 ### Troubleshooting rápido
 - Porta ocupada (8080/9090):
 ```powershell
@@ -278,6 +304,7 @@ app_jakarta/
  \- log/ (maven_deploy.log)
 ```
 
+<a id="readme-testar-login"></a>
 ### Testar login (Tomcat e WildFly)
 Os servidores ficam em `server/`. Abaixo o passo a passo para subir, publicar e validar login.
 

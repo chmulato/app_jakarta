@@ -1,5 +1,10 @@
 # Arquitetura do Projeto (Atualizada)
 
+> Veja também no README
+- [Setup rápido](../README.md#readme-setup-rapido)
+- [Deploy](../README.md#readme-deploy)
+- [Datasource (PostgreSQL)](../README.md#readme-datasource)
+
 ## Visão geral
 O projeto utiliza um script Python (`main.py`) como orquestrador central para:
 1. Verificação de ambiente (Java, Maven, Docker, PostgreSQL)

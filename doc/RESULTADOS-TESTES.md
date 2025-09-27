@@ -1,5 +1,9 @@
 # Resultados dos Testes de Deploy (Atualizado)
 
+> Veja também no README
+- [Execução fim a fim (Opção 12)](../README.md#readme-opcao-12)
+- [Troubleshooting rápido](../README.md#readme-troubleshooting)
+
 ## Histórico
 | Data | Contexto |
 |------|----------|
