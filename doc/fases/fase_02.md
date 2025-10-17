@@ -1,9 +1,13 @@
 ﻿# Fase 2 · Integração Mercado Livre
 
+> Atualização 17/out/2025 · Fase ativa. Checklist e evidências em [doc/checklist/checklist.md](../checklist/checklist.md).
+
 ## Objetivo
+
 Automatizar a entrada de pedidos provenientes do Mercado Livre (ML) no Hub, reduzindo digitação manual e erros. Eventos recebidos via webhook devem criar ou atualizar pedidos e volumes, posicionar o status correto e disparar notificações de pronto para retirada quando aplicável.
 
 ## Escopo Funcional
+
 - **Cadastro do conector ML**
   - Tela `Integrações > Conectores` para configurar `client_id`, `client_secret`, `refresh_token`, loja/tenant e `url_webhook` (somente leitura).
   - Botões: Testar, Sincronizar agora e Reautorizar.
@@ -30,6 +34,7 @@ Automatizar a entrada de pedidos provenientes do Mercado Livre (ML) no Hub, redu
   - Backoff exponencial automático para erros transitórios.
 
 ## Requisitos Não Funcionais
+
 - Idempotência rígida (constraint única em tabela de deduplicação).
 - Resiliência com retry, backoff e circuit breaker para chamadas externas.
 - Timeout máximo de 5 segundos por requisição externa.
@@ -38,6 +43,7 @@ Automatizar a entrada de pedidos provenientes do Mercado Livre (ML) no Hub, redu
 - Conformidade LGPD: armazenar apenas dados mínimos do destinatário e mascarar PII em logs.
 
 ## APIs REST
+
 - **Inbound (webhook)**
   - `POST /api/integracoes/ml/webhook`
     - Headers: `X-ML-Signature` (ou similar), `X-Event-Type`, `X-Tenant`.
@@ -50,6 +56,7 @@ Automatizar a entrada de pedidos provenientes do Mercado Livre (ML) no Hub, redu
   - `POST /api/notificacoes/pedido/{pedidoId}/pronto`
 
 ## Modelo de Dados
+
 - **Novas tabelas**
   - `integracao_conector(id, canal, tenant_id, client_id, client_secret_enc, refresh_token_enc, status, last_sync_at, created_at, updated_at)`
   - `integracao_evento(id, canal, tenant_id, external_id, tipo, payload_json, received_at, processed_at, status, error_msg, reprocess_count, trace_id)`
@@ -63,6 +70,7 @@ Automatizar a entrada de pedidos provenientes do Mercado Livre (ML) no Hub, redu
   - `idempotencia(chave)` unique
 
 ## Regras de Negócio
+
 - Criar pedido/volume quando `external_id + canal` não existir; atualizar dados quando existir.
 - Status internos seguem fluxo `RECEBIDO → PRONTO → RETIRADO` (compatível com Fase 1).
 - Etiqueta disponível atualiza volume e define `ready_at` quando pré-condições satisfeitas.
@@ -72,6 +80,7 @@ Automatizar a entrada de pedidos provenientes do Mercado Livre (ML) no Hub, redu
 - Campos mínimos do pedido: `external_id`, `destinatario.nome`, `destinatario.doc`, `destinatario.telefone`, `itens[]`, `volume{peso, dimensoes}`, `etiqueta` (quando disponível).
 
 ## Estratégia Técnica
+
 - **Fila/Outbox**: utilizar JMS no WildFly ou fallback em tabela outbox com job de consumo e lock otimista.
 - **Idempotência**: inserir na tabela `idempotencia` antes do processamento; em `unique_violation`, pular processamento.
 - **Backoff**: reintentos em 30s, 2min e 10min (configurável).
@@ -80,6 +89,7 @@ Automatizar a entrada de pedidos provenientes do Mercado Livre (ML) no Hub, redu
 - **Observabilidade**: gerar ou propagar `traceId`, correlacionando webhook → evento → pedido.
 
 ## DDL Sugerida (Flyway V2)
+
 ```sql
 create table integracao_conector (
   id bigserial primary key,
@@ -119,7 +129,9 @@ create index if not exists ix_evento_tenant_canal on integracao_evento(tenant_id
 ```
 
 ## Contratos Internos
+
 - **Mensagem enfileirada (exemplo)**
+
 ```json
 {
   "canal": "ML",
@@ -131,22 +143,26 @@ create index if not exists ix_evento_tenant_canal on integracao_evento(tenant_id
   "traceId": "a8a4b8e0-...."
 }
 ```
+
 - **Chave de idempotência**
   - `ML|123|ORDER_CREATED|ML-ORD-987654|v1`
 
 ## Testes Recomendados
+
 - **Unidade**: gerador de chave de idempotência, mapeamentos SKU/status, parser de payload.
 - **Integração**: webhook → persistência em `integracao_evento`; worker cria/atualiza pedido sem duplicar registros.
 - **Notificação**: envio único quando pedido passa para `PRONTO` e reenvio manual via UI.
 - **Reprocessamento**: botão de reprocessar enfileira novamente e atualiza auditoria/contadores.
 
 ## Rollout
+
 - Habilitar feature flag `integracao.ml.enabled` por tenant.
 - Aplicar migração Flyway V2.
 - Cadastrar conector em `integracao_conector` e executar fluxo de Reautorizar/Testar.
 - Monitorar backlog da fila e taxa de erro nas primeiras 24-48h.
 
 ## Validações em Python
+
 - `python -m pytest tests/fase_02/test_webhook_ml.py` para validar assinatura, idempotência e persistência do evento.
 - `python -m pytest tests/fase_02/test_worker_ml.py` para conferir criação/atualização de pedidos e disparo de notificações.
 - `python scripts/validadores/monitorar_fila.py --canal ML` para verificar métricas de backlog e reprocessamentos pendentes.
