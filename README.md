@@ -47,6 +47,7 @@ Aplicação Java (Jakarta EE) com autenticação, automação de build/deploy vi
     - [WildFly (porta 8080)](#wildfly-porta-8080)
     - [Se o login falhar](#se-o-login-falhar)
   - [Documentação essencial](#documentação-essencial)
+  - [Documentação complementar](#documentação-complementar)
 
 ---
 
@@ -284,14 +285,22 @@ Os servidores ficam em `server/`. Use o passo a passo abaixo para validar autent
 
 ### Documentação essencial
 
-- Guia de deploy: `doc/DEPLOY.md`.
-- Arquitetura: `doc/ARQUITETURA.md`.
-- Comandos Maven: `doc/MAVEN-COMANDOS.md`.
-- Validação/Testes: `doc/TESTES-RELATORIO.md`, `doc/RESULTADOS-TESTES.md`.
-- Ambiente VS Code sem MCP: `doc/README_NO_MCP.md`.
+- [Guia de deploy (passo a passo)](doc/DEPLOY.md)
+- [Arquitetura e visão macro](doc/ARQUITETURA.md)
+- [Comandos Maven usados no projeto](doc/MAVEN-COMANDOS.md)
+- [Relatórios de testes automatizados](doc/RESULTADOS-TESTES.md)
+- [Checklist de testes manuais e evidências](doc/TESTES-RELATORIO.md)
+- [Execução local sem MCP/VS Code](doc/README_NO_MCP.md)
 
-> O artigo executivo está em `doc/ARTICLE.md` (referência complementar).
+> Referência executiva: [doc/ARTICLE.md](doc/ARTICLE.md)
+
+### Documentação complementar
+
+- [Histórico de fases e pendências](doc/fases/)
+- [Resumo de refatorações e decisões](doc/REFATORACAO.md)
+- [Checklist de entrega](doc/checklist/checklist.md)
+- Pastas de logs, seeds e init scripts descritas em [docker/postgres/init](docker/postgres/init/) e [logs/](logs/)
 
 
 —
-Última atualização: Campo Largo, quinta-feira, 16 de outubro de 2025.
+Última atualização: Campo Largo, sexta-feira, 17 de outubro de 2025.
