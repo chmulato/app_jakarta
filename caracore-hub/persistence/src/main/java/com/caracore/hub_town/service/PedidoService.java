@@ -67,7 +67,11 @@ public class PedidoService {
             if (pedido == null) {
                 throw new EntityNotFoundException("Pedido não encontrado");
             }
-            pedido.marcarPronto();
+            try {
+                pedido.marcarPronto();
+            } catch (IllegalStateException ex) {
+                throw new IllegalArgumentException(ex.getMessage(), ex);
+            }
             EventoPedido evento = new EventoPedido();
             evento.setTipo(TipoEvento.PRONTO);
             evento.setActor(actor);

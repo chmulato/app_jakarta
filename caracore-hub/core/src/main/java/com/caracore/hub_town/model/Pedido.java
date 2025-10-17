@@ -100,19 +100,26 @@ public class Pedido {
     }
 
     public boolean podeSerMarcadoComoPronto() {
-        return status == PedidoStatus.RECEBIDO && volumes.stream().allMatch(v -> v.getStatus() == VolumeStatus.ALOCADO || v.getStatus() == VolumeStatus.PRONTO);
+        if (status != PedidoStatus.RECEBIDO) {
+            return false;
+        }
+        if (volumes.isEmpty()) {
+            return false;
+        }
+        return volumes.stream().noneMatch(v -> v.getStatus() == VolumeStatus.RETIRADO);
     }
 
     public void marcarPronto() {
-        if (podeSerMarcadoComoPronto()) {
-            status = PedidoStatus.PRONTO;
-            readyAt = LocalDateTime.now();
-            volumes.forEach(v -> {
-                if (v.getStatus() == VolumeStatus.ALOCADO) {
-                    v.setStatus(VolumeStatus.PRONTO);
-                }
-            });
+        if (!podeSerMarcadoComoPronto()) {
+            throw new IllegalStateException("Pedido não pode ser marcado como PRONTO");
         }
+        status = PedidoStatus.PRONTO;
+        readyAt = LocalDateTime.now();
+        volumes.forEach(v -> {
+            if (v.getStatus() == VolumeStatus.RECEBIDO || v.getStatus() == VolumeStatus.ALOCADO) {
+                v.setStatus(VolumeStatus.PRONTO);
+            }
+        });
     }
 
     public void marcarRetirado() {

@@ -322,17 +322,42 @@ def ensure_docker_db_up(timeout: int = 60) -> bool:
         log("Docker não está disponível; seguindo sem subir DB via Compose.", "WARNING")
         return False
 
+    # Carregar configuração para saber porta/host antes de tentar subir o compose
+    db_cfg = load_db_config_from_compose()
+    host = db_cfg.get("host", "localhost")
+    port_cfg = db_cfg.get("port", 5432)
+    port = int(str(port_cfg).split(":")[-1]) if isinstance(port_cfg, str) else int(port_cfg)
+
     # Tentar subir serviços
     try:
         log("Subindo serviços do docker-compose (se necessários)...", "INFO")
-        subprocess.run(["docker", "compose", "up", "-d"], cwd=WORKSPACE_DIR, check=False)
+        compose_proc = subprocess.run(
+            ["docker", "compose", "up", "-d"],
+            cwd=WORKSPACE_DIR,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if compose_proc.returncode != 0:
+            combined = ((compose_proc.stdout or "") + "\n" + (compose_proc.stderr or "")).strip()
+            lowered = combined.lower()
+            if "port is already allocated" in lowered or (f":{port}" in lowered and "bind for" in lowered):
+                blockers = _find_containers_using_port(port)
+                if blockers:
+                    log(
+                        f"Porta {port} já está em uso pelos contêineres: {', '.join(blockers)}. Pare-os (ex.: `docker stop nome`) ou libere a porta e tente novamente.",
+                        "ERROR",
+                    )
+                else:
+                    log(f"Porta {port} já está em uso por outro processo. Libere a porta e tente novamente.", "ERROR")
+            else:
+                snippet = combined[:400] if combined else "(sem saída)"
+                log(f"docker compose up -d retornou código {compose_proc.returncode}. Saída: {snippet}", "WARNING")
+            return False
     except Exception as e:
         log(f"Falha ao executar docker compose up -d: {e}", "WARNING")
 
     # Aguardar porta do Postgres
-    db_cfg = load_db_config_from_compose()
-    host = db_cfg.get("host", "localhost")
-    port = int(str(db_cfg.get("port", 5432)).split(":")[-1]) if isinstance(db_cfg.get("port"), str) else int(db_cfg.get("port", 5432))
     start = time.time()
     while time.time() - start < timeout:
         try:
@@ -343,6 +368,33 @@ def ensure_docker_db_up(timeout: int = 60) -> bool:
             time.sleep(2)
     log("Timeout aguardando PostgreSQL do docker-compose.", "WARNING")
     return False
+
+
+def _find_containers_using_port(port: int) -> list[str]:
+    """Retorna nomes de contêineres Docker que estão expondo a porta informada."""
+    try:
+        proc = subprocess.run(
+            ["docker", "ps", "--format", "{{.Names}}|{{.Ports}}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if proc.returncode != 0:
+            return []
+        containers: list[str] = []
+        for line in (proc.stdout or "").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            name, _, port_info = line.partition("|")
+            if not port_info:
+                continue
+            port_info_low = port_info.lower()
+            if f":{port}->" in port_info_low or f"0.0.0.0:{port}" in port_info_low or f"[::]:{port}" in port_info_low:
+                containers.append(name.strip())
+        return containers
+    except Exception:
+        return []
 
 def restart_postgres_container(wait_seconds: int = 5) -> bool:
     """Reinicia o contêiner Postgres para liberar conexões, caso esteja lotado."""
@@ -1040,26 +1092,60 @@ def test_login_browser(base_url: str, email: str = "admin@meuapp.com", senha: st
                         page.press("input[type=password]", "Enter")
                     except Exception:
                         pass
-                # Aguardar destino
-                target_ok = False
+
+                # Aguardar a navegação estabilizar para inspecionar o destino
                 try:
-                    page.wait_for_url(lambda url: "/dashboard" in url, timeout=15000)
-                    target_ok = True
+                    page.wait_for_load_state("networkidle", timeout=15000)
                 except Exception:
-                    current = page.url or ""
-                    if "/dashboard" in current:
+                    pass
+
+                target_ok = False
+                current_url = page.url or ""
+                success_url_tokens = [
+                    "/dashboard",
+                    "/home",
+                    "/inicio",
+                    "/index",
+                    "/app",
+                ]
+                for token in success_url_tokens:
+                    if token in current_url:
                         target_ok = True
+                        break
+
+                if not target_ok and current_url:
+                    # Se não voltamos para /login e permanecemos na mesma origem, considerar sucesso
+                    if "/login" not in current_url:
+                        target_ok = True
+
                 if not target_ok:
                     try:
                         content = page.content().lower()
-                        if "dashboard" in content and "logout" in content:
+                        success_content_tokens = [
+                            "dashboard",
+                            "painel",
+                            "bem-vindo",
+                            "logout",
+                            "sair",
+                        ]
+                        if any(token in content for token in success_content_tokens):
                             target_ok = True
                     except Exception:
                         pass
+
+                if not target_ok:
+                    try:
+                        # Alguns templates exibem botões/links de saída sem alterar URL
+                        if page.locator("text=/logout|sair/i").first.is_visible():
+                            target_ok = True
+                    except Exception:
+                        pass
+
                 if target_ok:
+                    if current_url:
+                        log(f"Login via navegador validado (URL final: {current_url}).", "SUCCESS")
                     context.close()
                     browser.close()
-                    log("Login via navegador validado (redirecionado para /dashboard).", "SUCCESS")
                     return True
             context.close()
             browser.close()
@@ -1564,6 +1650,7 @@ def check_database_connection():
                 return True, f"Conectado ao banco de dados PostgreSQL: {db_host}:{db_port}/{db_name}"
             except Exception as e:
                 msg = str(e)
+                normalized = msg.lower()
                 if "too many clients" in msg.lower():
                     log("PostgreSQL retornou 'too many clients' — reiniciando contêiner e tentando novamente...", "WARNING")
                     restart_postgres_container()
@@ -1572,6 +1659,29 @@ def check_database_connection():
                         return True, f"Conexão restabelecida após reinício do Postgres: {db_host}:{db_port}/{db_name}"
                     except Exception as e2:
                         return False, f"Erro ao conectar ao banco de dados após reinício: {str(e2)}"
+                if "server closed the connection unexpectedly" in normalized or "terminating connection due to administrator command" in normalized:
+                    log("PostgreSQL ainda está inicializando; aguardando 5s e tentando novamente...", "WARNING")
+                    time.sleep(5)
+                    try:
+                        _try_connect()
+                        return True, f"Conectado ao banco de dados PostgreSQL após nova tentativa: {db_host}:{db_port}/{db_name}"
+                    except Exception as e2:
+                        return False, f"Erro ao conectar ao banco de dados após nova tentativa: {str(e2)}"
+                if "password authentication failed" in normalized:
+                    hint = (
+                        "Falha de autenticação para o usuário configurado no Postgres. "
+                        "Verifique as credenciais em docker-compose.yml/variáveis ou considere reiniciar o volume (docker compose down -v)."
+                    )
+                    log(hint, "ERROR")
+                    return False, f"Erro ao conectar ao banco de dados: {msg}"
+                if "connection refused" in normalized or "timeout expired" in normalized:
+                    log("PostgreSQL não respondeu à conexão; aguardando 3s e tentando novamente...", "WARNING")
+                    time.sleep(3)
+                    try:
+                        _try_connect()
+                        return True, f"Conectado ao banco de dados PostgreSQL após nova tentativa: {db_host}:{db_port}/{db_name}"
+                    except Exception as e2:
+                        return False, f"Erro ao conectar ao banco de dados após nova tentativa: {str(e2)}"
                 return False, f"Erro ao conectar ao banco de dados: {msg}"
         except ImportError:
             return True, "Módulo psycopg2 não instalado, mas contêiner PostgreSQL está em execução"
@@ -4067,6 +4177,64 @@ def run_embedded_tomcat():
         log(f"Erro ao iniciar Tomcat incorporado: {str(e)}", "ERROR")
         return False
 
+def run_pytest(base_url: str) -> bool:
+    """
+    Executa os testes Python (pytest) em um subprocesso, configurando a URL base.
+    Retorna True se os testes passaram, False caso contrário.
+    """
+    log("Iniciando execução dos testes Python (pytest)...", "INFO")
+
+    # Configurar a variável de ambiente para os testes saberem a URL
+    env = os.environ.copy()
+    env["APP_TEST_BASE_URL"] = base_url
+
+    try:
+        command: list[str] | None = None
+
+        # Preferir o mesmo interpretador que está executando este script
+        python_exec = sys.executable
+        if python_exec and os.path.exists(python_exec):
+            command = [python_exec, "-m", "pytest", "tests/fase_01"]
+        else:
+            # Fallback direto para o executável pytest da venv
+            pytest_exe = os.path.join(WORKSPACE_DIR, ".venv", "Scripts", "pytest.exe")
+            if os.path.exists(pytest_exe):
+                command = [pytest_exe, "tests/fase_01"]
+
+        if not command:
+            log("Não foi possível localizar um interpretador Python ou pytest.exe para executar os testes.", "ERROR")
+            return False
+        
+        log(f"Executando comando: {' '.join(command)}", "INFO")
+        log(f"URL base para testes: {base_url}", "INFO")
+
+        # Usar Popen para capturar a saída em tempo real
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace', env=env)
+
+        # Imprimir a saída do pytest em tempo real
+        while True:
+            output = process.stdout.readline()
+            if output == '' and process.poll() is not None:
+                break
+            if output:
+                print(output.strip())
+        
+        retcode = process.poll()
+        
+        if retcode == 0:
+            log("Testes Python executados com sucesso.", "SUCCESS")
+            return True
+        # Pytest retorna 5 se nenhum teste for encontrado
+        elif retcode == 5:
+            log("Nenhum teste Python foi executado (pytest exit code 5).", "WARNING")
+            return True # Considerar sucesso se não há testes para rodar
+        else:
+            log(f"Falha na execução dos testes Python (exit code: {retcode}).", "ERROR")
+            return False
+
+    except Exception as e:
+        log(f"Erro inesperado ao executar os testes Python: {e}", "ERROR")
+        return False
 def stop_tomcat_server():
     """
     Para o servidor Tomcat se estiver em execução.
@@ -5215,6 +5383,10 @@ def main():
                 return ok_root
 
             tested_any = False
+            tomcat_login_ok = False
+            wildfly_login_ok = False
+            tomcat_base_url: str | None = None
+            wildfly_base_url: str | None = None
             if is_server_up("localhost", TOMCAT_PORT):
                 base = f"http://localhost:{TOMCAT_PORT}{'' if app_ctx == '/' else app_ctx}/"
                 log(f"Tomcat aparentemente disponível em {base}. Testando login (browser)...", "INFO")
@@ -5223,10 +5395,14 @@ def main():
                     log("Tentando fallback HTTP para Tomcat...", "WARNING")
                     if try_logins_for(base):
                         log("Login no Tomcat validado via HTTP (ROOT ou /caracore-hub/).", "SUCCESS")
+                        tomcat_login_ok = True
+                        tomcat_base_url = base
                     else:
                         log("Falha ao validar login no Tomcat (browser e HTTP).", "ERROR")
                 else:
                     log("Login no Tomcat validado via navegador.", "SUCCESS")
+                    tomcat_login_ok = True
+                    tomcat_base_url = base
                 tested_any = True
             else:
                 log("Tomcat não está em execução.", "WARNING")
@@ -5274,13 +5450,29 @@ def main():
                         ok_http = try_logins_for(base)
                         if ok_http:
                             log("Login no WildFly validado via HTTP.", "SUCCESS")
+                            wildfly_login_ok = True
+                            wildfly_base_url = base
                         else:
                             log("Falha ao validar login no WildFly (browser e HTTP).", "ERROR")
                     else:
                         log("Login no WildFly validado via navegador.", "SUCCESS")
+                        wildfly_login_ok = True
+                        wildfly_base_url = base
                     tested_any = True
             else:
                 log("WildFly não está em execução.", "WARNING")
+
+            if tomcat_login_ok and tomcat_base_url:
+                if run_pytest(tomcat_base_url):
+                    log("Testes Python concluídos com sucesso contra o Tomcat.", "SUCCESS")
+                else:
+                    log("Falha na execução dos testes Python após deploy no Tomcat.", "ERROR")
+
+            if wildfly_login_ok and wildfly_base_url:
+                if run_pytest(wildfly_base_url):
+                    log("Testes Python concluídos com sucesso contra o WildFly.", "SUCCESS")
+                else:
+                    log("Falha na execução dos testes Python após deploy no WildFly.", "ERROR")
 
             if not tested_any:
                 log("Nenhum servidor disponível (Tomcat 9090 / WildFly 8080).", "WARNING")

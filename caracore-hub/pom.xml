@@ -22,6 +22,7 @@
         <hibernate.validator.version>8.0.1.Final</hibernate.validator.version>
         <hikaricp.version>5.1.0</hikaricp.version>
         <postgresql.version>42.7.2</postgresql.version>
+    <jersey.version>3.1.7</jersey.version>
         <log4j.version>2.20.0</log4j.version>
         <pdfbox.version>2.0.32</pdfbox.version>
         <jbcrypt.version>0.4</jbcrypt.version>
@@ -218,7 +219,3 @@
         </profile>
     </profiles>
 </project>
-
-
-
-
