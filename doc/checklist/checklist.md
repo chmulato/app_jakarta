@@ -13,53 +13,53 @@ Cada item pode ser marcado conforme validado com **testes em Python (pytest/Test
 
 ### Fundamentos
 
-- [ ] Projeto multi-módulos (api, web, core, persistence)
-- [ ] Flyway configurado e primeira migração aplicada
-- [ ] Logging JSON + correlação (trace_id) habilitado
-- [ ] Health/readiness endpoint ativo
-- [ ] RBAC: Admin, Supervisor, Operador
+- [x] Projeto multi-módulos (api, web, core, persistence)
+- [x] Flyway configurado e primeira migração aplicada
+- [x] Logging JSON + correlação (trace_id) habilitado
+- [x] Health/readiness endpoint ativo
+- [x] RBAC: Admin, Supervisor, Operador
 
 ### Banco de dados
 
-- [ ] Tabela `usuario`
-- [ ] Tabela `pedido`
-- [ ] Tabela `volume`
-- [ ] Tabela `posicao`
-- [ ] Tabela `evento`
-- [ ] Índices principais (`tenant_id,status,created_at` etc.)
+- [x] Tabela `usuario`
+- [x] Tabela `pedido`
+- [x] Tabela `volume`
+- [x] Tabela `posicao`
+- [x] Tabela `evento`
+- [x] Índices principais (`tenant_id,status,created_at` etc.)
 
 ### Telas JSP + Bootstrap
 
-- [ ] `/login.jsp` (login, feedback de erro)
-- [ ] `/dashboard.jsp` (contadores do dia)
-- [ ] `/recebimento/entrada.jsp` (criar pedido+volume)
-- [ ] `/triagem/alocar.jsp` (sugerir/confirmar posição)
-- [ ] `/pedidos/lista.jsp` + filtros
-- [ ] `/pedidos/detalhe.jsp`
-- [ ] `/retirada/retirar.jsp` (pronto → retirado)
-- [ ] Geração de **PDF etiqueta** e **PDF comprovante**
+- [x] `/login.jsp` (login, feedback de erro)
+- [x] `/dashboard.jsp` (contadores do dia)
+- [x] `/recebimento/entrada.jsp` (criar pedido+volume)
+- [x] `/triagem/alocar.jsp` (sugerir/confirmar posição)
+- [x] `/pedidos/lista.jsp` + filtros
+- [x] `/pedidos/detalhe.jsp`
+- [x] `/retirada/retirar.jsp` (pronto → retirado)
+- [x] Geração de **PDF etiqueta** e **PDF comprovante**
 
 ### APIs mínimas
 
-- [ ] `POST /api/pedidos`
-- [ ] `GET /api/pedidos?status&canal&data`
-- [ ] `POST /api/pedidos/{id}/ready`
-- [ ] `POST /api/pedidos/{id}/pickup`
+- [x] `POST /api/pedidos`
+- [x] `GET /api/pedidos?status&canal&data`
+- [x] `POST /api/pedidos/{id}/ready`
+- [x] `POST /api/pedidos/{id}/pickup`
 
 ### Critérios de aceite (Fase 1)
 
-- [ ] Fluxo completo manual: **RECEBIDO → PRONTO → RETIRADO**
-- [ ] Pesquisa por código/telefone operando
-- [ ] Comprovante PDF anexado ao pedido
+- [x] Fluxo completo manual: **RECEBIDO → PRONTO → RETIRADO**
+- [x] Pesquisa por código/telefone operando
+- [x] Comprovante PDF anexado ao pedido
 
 ### Suíte de testes Python (Fase 1)
 
-- [ ] `tests/test_auth.py::test_login_success_e_rbac`
-- [ ] `tests/test_pedidos.py::test_criar_pedido_e_volume`
-- [ ] `tests/test_pedidos.py::test_marcar_pronto_e_retirar`
-- [ ] `tests/test_pdf.py::test_gera_etiqueta_e_comprovante`
-- [ ] `tests/test_db.py::test_indices_e_constraints_basicas`
-- [ ] `tests/test_ui.py::test_listagem_filtra_por_status`
+- [x] `tests/test_auth.py::test_login_success_e_rbac`
+- [x] `tests/test_pedidos.py::test_criar_pedido_e_volume`
+- [x] `tests/test_pedidos.py::test_marcar_pronto_e_retirar`
+- [x] `tests/test_pdf.py::test_gera_etiqueta_e_comprovante`
+- [x] `tests/test_db.py::test_indices_e_constraints_basicas`
+- [x] `tests/test_ui.py::test_listagem_filtra_por_status`
 
 ---
 
