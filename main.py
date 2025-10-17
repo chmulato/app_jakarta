@@ -2547,14 +2547,44 @@ def validate_tomcat_jndi(runtime_check: bool = True) -> tuple[bool, str]:
                         'name [jdbc/postgresds] is bound',
                         'org.apache.commons.dbcp2',
                     ]
-                    tail_low = tail.lower()
-                    has_err = any(tok in tail_low for tok in err_signals)
-                    has_ok = any(tok in tail_low for tok in ok_signals)
+                    # Consider only recent log lines to avoid false-positives from old entries.
+                    import re, datetime
+                    tail_lines = tail.splitlines()
+                    now = datetime.datetime.now()
+                    window_minutes = 10
+                    recent_err = False
+                    recent_ok = False
+
+                    # Match Catalina timestamp like: 17-Oct-2025 18:17:31.877
+                    ts_re = re.compile(r'^(\d{1,2}-[A-Za-z]{3}-\d{4} \d{2}:\d{2}:\d{2}(?:\.\d{1,3})?)')
+                    for line in tail_lines:
+                        low = line.lower()
+                        m = ts_re.match(line.strip())
+                        ts_dt = None
+                        if m:
+                            ts_str = m.group(1)
+                            try:
+                                ts_dt = datetime.datetime.strptime(ts_str, '%d-%b-%Y %H:%M:%S.%f')
+                            except Exception:
+                                try:
+                                    ts_dt = datetime.datetime.strptime(ts_str, '%d-%b-%Y %H:%M:%S')
+                                except Exception:
+                                    ts_dt = None
+
+                        is_recent = True if ts_dt is None else ((now - ts_dt).total_seconds() <= window_minutes * 60)
+
+                        if is_recent and any(tok in low for tok in err_signals):
+                            recent_err = True
+                        if is_recent and any(tok in low for tok in ok_signals):
+                            recent_ok = True
+
+                    has_err = recent_err
+                    has_ok = recent_ok
                     if has_err:
                         ok = False
-                        msg.append("Erros detectados em catalina.log referentes ao datasource/JNDI")
+                        msg.append("Erros detectados em catalina.log referentes ao datasource/JNDI (em janela recente)")
                     elif has_ok:
-                        msg.append("Logs indicam datasource inicializado/bound")
+                        msg.append("Logs indicam datasource inicializado/bound (em janela recente)")
         return ok, '; '.join(msg)
     except Exception as e:
         return False, f"Falha na validação JNDI do Tomcat: {e}"
