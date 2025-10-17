@@ -1,5 +1,9 @@
 # Resultados dos Testes de Deploy (Atualizado)
 
+> Veja também no README
+- [Execução fim a fim (Opção 12)](../README.md#readme-opcao-12)
+- [Troubleshooting rápido](../README.md#readme-troubleshooting)
+
 ## Histórico
 | Data | Contexto |
 |------|----------|
@@ -114,6 +118,19 @@ Ou usando script (build sem testes + depois testes separados):
 python .\main.py --only-check
 mvn test
 ```
+
+## Testes Python (Fase 1)
+```powershell
+pytest tests/fase_01
+```
+
+### Resultado 26/09/2025
+| Teste | Status | Observação |
+|-------|--------|------------|
+| Autenticação (login sucesso / erro) | ⏭️ Skip | Ambiente web não estava ativo durante a execução; testes aguardam `APP_TEST_BASE_URL`. |
+| Fluxo de pedidos completo | ⏭️ Skip | Dependem da API rodando (`/api/pedidos`). |
+
+> Os testes em Python agora fazem parte da suíte oficial da fase 1. Para executá-los, iniciar a aplicação via `python .\main.py 12` (ou subir Tomcat/WildFly manualmente) antes de rodar o `pytest`.
 
 ---
 

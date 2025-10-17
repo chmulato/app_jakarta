@@ -3,6 +3,11 @@
 ## Objetivo
 Resumo operacional para realizar build e deploy da aplicação usando Maven ou o orquestrador Python (`main.py`).
 
+> Veja também: Guia rápido e fluxo E2E no README
+- Setup rápido: consulte [README — Setup rápido](../README.md#readme-setup-rapido)
+- Execução (menu): consulte [README — Execução (menu)](../README.md#readme-execucao-menu)
+- E2E (opção 12): consulte [README — Execução fim a fim (Opção 12)](../README.md#readme-opcao-12)
+
 ## Visão Rápida
 | Item | Tomcat | WildFly |
 |------|--------|---------|
@@ -58,6 +63,7 @@ python .\main.py --tomcat-dir C:\srv\tomcat10 --wildfly-dir D:\srv\wf37
 Logs de execução Maven/Deploy: `log/maven_deploy.log`.
 
 ### Execução fim a fim (Opção 12)
+Para detalhes do fluxo completo automatizado (parada/limpeza de servidores, build, deploy Tomcat/WildFly, validações e testes de login), consulte também o [README — Execução fim a fim (Opção 12)](../README.md#readme-opcao-12).
 Fluxo completo e não interativo: para servidores ativos, prepara DB e seed (BCrypt $2a$), builda, faz deploy (Tomcat cold deploy / WildFly hot deploy), valida JNDI (com nomes distintos por servidor) e testa login.
 
 ```powershell

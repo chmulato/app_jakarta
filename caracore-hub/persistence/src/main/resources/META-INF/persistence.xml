@@ -1,0 +1,35 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<persistence xmlns="https://jakarta.ee/xml/ns/persistence"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xsi:schemaLocation="https://jakarta.ee/xml/ns/persistence 
+             https://jakarta.ee/xml/ns/persistence/persistence_3_0.xsd"
+             version="3.0">
+
+    <persistence-unit name="meuAppPU" transaction-type="RESOURCE_LOCAL">
+        <provider>org.hibernate.jpa.HibernatePersistenceProvider</provider>
+        <non-jta-data-source>java:/jdbc/PostgresDS</non-jta-data-source>
+
+        <class>com.caracore.hub_town.model.Usuario</class>
+        <class>com.caracore.hub_town.model.Produto</class>
+        <class>com.caracore.hub_town.model.Pedido</class>
+        <class>com.caracore.hub_town.model.Volume</class>
+        <class>com.caracore.hub_town.model.Posicao</class>
+        <class>com.caracore.hub_town.model.EventoPedido</class>
+
+        <properties>
+            <property name="jakarta.persistence.jdbc.dialect" value="org.hibernate.dialect.PostgreSQLDialect"/>
+            <property name="hibernate.show_sql" value="true"/>
+            <property name="hibernate.format_sql" value="true"/>
+            <property name="hibernate.use_sql_comments" value="true"/>
+            <property name="hibernate.hbm2ddl.auto" value="update"/>
+            <property name="hibernate.cache.use_second_level_cache" value="false"/>
+            <property name="hibernate.cache.use_query_cache" value="false"/>
+            <property name="hibernate.jdbc.batch_size" value="25"/>
+            <property name="hibernate.order_inserts" value="true"/>
+            <property name="hibernate.order_updates" value="true"/>
+            <property name="hibernate.jdbc.batch_versioned_data" value="true"/>
+            <property name="hibernate.jdbc.time_zone" value="America/Sao_Paulo"/>
+            <property name="hibernate.type.json.format_mapper" value="none"/>
+        </properties>
+    </persistence-unit>
+</persistence>

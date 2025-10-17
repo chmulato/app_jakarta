@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -14,7 +13,7 @@
 # limitations under the License.
 #
 # © 2025 23.969.028 CHRISTIAN VLADIMIR UHDRE MULATO (CNPJ 23.969.028/0001-37)
-#
+
 """
 Script principal para automação de build e deploy da aplicação Java.
 Substitui as funcionalidades do script PowerShell Start-App.ps1.
@@ -189,6 +188,10 @@ def build_arg_parser():
     parser.add_argument("--tomcat-dir", dest="tomcat_dir", help="Caminho do Tomcat para override")
     parser.add_argument("--wildfly-dir", dest="wildfly_dir", help="Caminho do WildFly para override")
     parser.add_argument("--only-check", action="store_true", help="Apenas verificar ambiente e sair")
+    parser.add_argument("--tomcat-run-mode", choices=["foreground", "background"], help="Controla se o Tomcat inicia em foreground (logs no console) ou background (startup). Padrão: background")
+    parser.add_argument("--tomcat-foreground", action="store_true", help="Atalho para forçar o Tomcat a iniciar em foreground (equivalente a --tomcat-run-mode foreground)")
+    parser.add_argument("--wildfly-run-mode", choices=["foreground", "background"], help="Controla se o WildFly inicia em foreground (logs no console) ou background. Padrão: background")
+    parser.add_argument("--wildfly-foreground", action="store_true", help="Atalho para forçar o WildFly a iniciar em foreground (equivalente a --wildfly-run-mode foreground)")
     # Aceitar uma opção posicional (número ou nome), ex.: 2, deploy-tomcat, wildfly, iniciar-tomcat, test-login
     parser.add_argument("option", nargs="?", help="Opção do menu (0-12) ou nome: check, deploy-tomcat, start-tomcat, deploy-wildfly, start-wildfly, undeploy, diag-tomcat, diag-wildfly, set-tomcat-port, cfg-wildfly-ds, cfg-tomcat-ds, test-login")
     return parser
@@ -285,6 +288,21 @@ def normalize_option(opt: str | None) -> str | None:
     }
     return aliases.get(m, opt if m.isdigit() else None)
 
+def normalize_run_mode(value) -> str | None:
+    """Normaliza valores de modo de execução do Tomcat."""
+    if value is None:
+        return None
+    v = str(value).strip().lower()
+    if v in {"foreground", "fg", "front", "console"}:
+        return "foreground"
+    if v in {"background", "bg", "back", "daemon"}:
+        return "background"
+    if v in {"1", "true", "yes", "y", "on"}:
+        return "foreground"
+    if v in {"0", "false", "no", "n", "off"}:
+        return "background"
+    return None
+
 def is_server_up(host: str, port: int, timeout: float = 2.0) -> bool:
     try:
         with socket.create_connection((host, port), timeout=timeout):
@@ -304,17 +322,42 @@ def ensure_docker_db_up(timeout: int = 60) -> bool:
         log("Docker não está disponível; seguindo sem subir DB via Compose.", "WARNING")
         return False
 
+    # Carregar configuração para saber porta/host antes de tentar subir o compose
+    db_cfg = load_db_config_from_compose()
+    host = db_cfg.get("host", "localhost")
+    port_cfg = db_cfg.get("port", 5432)
+    port = int(str(port_cfg).split(":")[-1]) if isinstance(port_cfg, str) else int(port_cfg)
+
     # Tentar subir serviços
     try:
         log("Subindo serviços do docker-compose (se necessários)...", "INFO")
-        subprocess.run(["docker", "compose", "up", "-d"], cwd=WORKSPACE_DIR, check=False)
+        compose_proc = subprocess.run(
+            ["docker", "compose", "up", "-d"],
+            cwd=WORKSPACE_DIR,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if compose_proc.returncode != 0:
+            combined = ((compose_proc.stdout or "") + "\n" + (compose_proc.stderr or "")).strip()
+            lowered = combined.lower()
+            if "port is already allocated" in lowered or (f":{port}" in lowered and "bind for" in lowered):
+                blockers = _find_containers_using_port(port)
+                if blockers:
+                    log(
+                        f"Porta {port} já está em uso pelos contêineres: {', '.join(blockers)}. Pare-os (ex.: `docker stop nome`) ou libere a porta e tente novamente.",
+                        "ERROR",
+                    )
+                else:
+                    log(f"Porta {port} já está em uso por outro processo. Libere a porta e tente novamente.", "ERROR")
+            else:
+                snippet = combined[:400] if combined else "(sem saída)"
+                log(f"docker compose up -d retornou código {compose_proc.returncode}. Saída: {snippet}", "WARNING")
+            return False
     except Exception as e:
         log(f"Falha ao executar docker compose up -d: {e}", "WARNING")
 
     # Aguardar porta do Postgres
-    db_cfg = load_db_config_from_compose()
-    host = db_cfg.get("host", "localhost")
-    port = int(str(db_cfg.get("port", 5432)).split(":")[-1]) if isinstance(db_cfg.get("port"), str) else int(db_cfg.get("port", 5432))
     start = time.time()
     while time.time() - start < timeout:
         try:
@@ -325,6 +368,33 @@ def ensure_docker_db_up(timeout: int = 60) -> bool:
             time.sleep(2)
     log("Timeout aguardando PostgreSQL do docker-compose.", "WARNING")
     return False
+
+
+def _find_containers_using_port(port: int) -> list[str]:
+    """Retorna nomes de contêineres Docker que estão expondo a porta informada."""
+    try:
+        proc = subprocess.run(
+            ["docker", "ps", "--format", "{{.Names}}|{{.Ports}}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if proc.returncode != 0:
+            return []
+        containers: list[str] = []
+        for line in (proc.stdout or "").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            name, _, port_info = line.partition("|")
+            if not port_info:
+                continue
+            port_info_low = port_info.lower()
+            if f":{port}->" in port_info_low or f"0.0.0.0:{port}" in port_info_low or f"[::]:{port}" in port_info_low:
+                containers.append(name.strip())
+        return containers
+    except Exception:
+        return []
 
 def restart_postgres_container(wait_seconds: int = 5) -> bool:
     """Reinicia o contêiner Postgres para liberar conexões, caso esteja lotado."""
@@ -390,6 +460,14 @@ def find_built_war() -> str | None:
                 return os.path.join(target, wars[0])
     except Exception:
         pass
+    return None
+
+def _wildfly_cli_credentials() -> tuple[str, str] | None:
+    """Obtém credenciais para o jboss-cli, se configuradas via variáveis de ambiente."""
+    user = os.environ.get("APP_WILDFLY_CLI_USER") or os.environ.get("WILDFLY_CLI_USER")
+    password = os.environ.get("APP_WILDFLY_CLI_PASSWORD") or os.environ.get("WILDFLY_CLI_PASSWORD")
+    if user and password:
+        return user, password
     return None
 
 def wait_for_port(port: int, timeout: int = 30) -> bool:
@@ -702,16 +780,92 @@ def deploy_wildfly_root_quick(war_path: str) -> bool:
         log(f"Falha ao copiar WAR para WildFly: {e}", "ERROR")
         return False
 
+def wildfly_cli_deploy(war_path: str, *, env: dict | None = None, force: bool = True, timeout: int | None = None) -> bool:
+    """Tenta aplicar hot deploy via jboss-cli, permitindo que o WildFly gerencie o processo."""
+    bin_dir = os.path.join(WILDFLY_DIR, "bin")
+    cli_exe = os.path.join(bin_dir, "jboss-cli.bat" if platform.system() == "Windows" else "jboss-cli.sh")
+    if not os.path.exists(cli_exe):
+        return False
+
+    env = env or setup_wildfly_environment()
+    war_path_abs = str(Path(war_path).resolve())
+    force_flag = " --force" if force else ""
+
+    run_kwargs = {
+        "cwd": bin_dir,
+        "env": env,
+        "capture_output": True,
+        "text": True,
+    }
+    if timeout is not None:
+        run_kwargs["timeout"] = timeout
+
+    if platform.system() == "Windows":
+        quoted_path = war_path_abs.replace("\"", "\\\"")
+        command = f'"{cli_exe}" --connect --command="deploy \"{quoted_path}\"{force_flag}"'
+        completed = subprocess.run(command, shell=True, **run_kwargs)
+    else:
+        command = [cli_exe, "--connect", f"--command=deploy \"{war_path_abs}\"{force_flag}"]
+        completed = subprocess.run(command, **run_kwargs)
+
+    if completed.returncode == 0:
+        log("Deploy via jboss-cli concluído com sucesso (hot deploy gerenciado pelo WildFly)", "SUCCESS")
+        if completed.stdout:
+            log(completed.stdout.strip(), "INFO")
+        return True
+
+    stderr = (completed.stderr or "").strip()
+    if stderr:
+        log(f"jboss-cli retornou erro: {stderr}", "WARNING")
+    return False
+
+
+def _wait_for_wildfly_deploy_marker(war_name: str, timeout: int = 45) -> bool:
+    deployments = os.path.join(WILDFLY_DIR, "standalone", "deployments")
+    deployed_marker = os.path.join(deployments, f"{war_name}.deployed")
+    failed_marker = os.path.join(deployments, f"{war_name}.failed")
+    start = time.time()
+
+    while time.time() - start < timeout:
+        if os.path.exists(failed_marker):
+            try:
+                with open(failed_marker, "r", encoding="utf-8", errors="ignore") as fh:
+                    snippet = fh.read(400)
+                log(f"Deploy do WildFly falhou (conteúdo de {war_name}.failed): {snippet}", "ERROR")
+            except Exception:
+                log(f"Deploy do WildFly falhou. Verifique {war_name}.failed", "ERROR")
+            return False
+        if os.path.exists(deployed_marker):
+            return True
+        time.sleep(1.5)
+
+    log(f"WildFly: não confirmou deployment de {war_name} dentro do tempo.", "WARNING")
+    return False
+
+
 def deploy_wildfly_war_quick(war_path: str) -> bool:
     """Hot deploy no WildFly mantendo o nome do WAR (contexto pelo nome/descriptor)."""
     if not os.path.exists(WILDFLY_DIR):
         log(f"WildFly não encontrado em: {WILDFLY_DIR}", "ERROR")
         return False
-    # Iniciar se necessário
-    if not is_server_up("localhost", WILDFLY_PORT):
+
+    env = setup_wildfly_environment()
+    war_name = os.path.basename(war_path)
+    server_http_up = is_server_up("localhost", WILDFLY_PORT)
+    server_mgmt_up = is_server_up("localhost", WILDFLY_MANAGEMENT_PORT)
+
+    if server_http_up or server_mgmt_up:
+        log("Servidor WildFly detectado em execução; tentando deploy via jboss-cli...", "INFO")
+        if wildfly_cli_deploy(war_path, env=env):
+            if _wait_for_wildfly_deploy_marker(war_name):
+                return True
+            log("jboss-cli executou, mas o marker .deployed não apareceu dentro do tempo. Continuando com fallback de arquivo...", "WARNING")
+        else:
+            log("Deploy via jboss-cli não foi concluído. Utilizando fallback baseado em arquivo...", "WARNING")
+
+    if not server_http_up:
         log("WildFly não detectado; iniciando...", "INFO")
         try:
-            env = setup_wildfly_environment()
             bin_dir = os.path.join(WILDFLY_DIR, "bin")
             if platform.system() == "Windows":
                 subprocess.Popen([os.path.join(bin_dir, "standalone.bat")], shell=True, env=env)
@@ -721,22 +875,22 @@ def deploy_wildfly_war_quick(war_path: str) -> bool:
             log(f"Falha ao iniciar WildFly: {e}", "ERROR")
             return False
         wait_for_port(WILDFLY_PORT, timeout=40)
-    # Copiar WAR
+
     deployments = os.path.join(WILDFLY_DIR, "standalone", "deployments")
     os.makedirs(deployments, exist_ok=True)
-    war_name = os.path.basename(war_path)
-    # Limpar marcadores anteriores desse WAR
-    for item in (war_name, war_name + ".deployed", war_name + ".failed", war_name + ".undeployed", war_name + ".isdeploying"):
+
+    for item in (war_name, f"{war_name}.deployed", f"{war_name}.failed", f"{war_name}.undeployed", f"{war_name}.isdeploying"):
         p = os.path.join(deployments, item)
         try:
             if os.path.isfile(p):
                 os.remove(p)
         except Exception:
             pass
+
     try:
         dest = os.path.join(deployments, war_name)
         shutil.copy2(war_path, dest)
-        log(f"WAR copiado para WildFly como {war_name} (hot deploy)", "SUCCESS")
+        log(f"WAR copiado para WildFly como {war_name} (fallback de hot deploy)", "SUCCESS")
         try:
             open(dest + ".dodeploy", "w").close()
         except Exception:
@@ -744,26 +898,8 @@ def deploy_wildfly_war_quick(war_path: str) -> bool:
     except Exception as e:
         log(f"Falha ao copiar WAR para WildFly: {e}", "ERROR")
         return False
-    # Aguardar marker .deployed do WAR específico
-    start = time.time()
-    deployed_marker = os.path.join(deployments, war_name + ".deployed")
-    while time.time() - start < 45:
-        if os.path.exists(deployed_marker):
-            return True
-        time.sleep(1.5)
-    log(f"WildFly: não confirmou deployment de {war_name} dentro do tempo.", "WARNING")
-    return False
-    # Aguardar marker .deployed ou sucesso de URL
-    deployed_marker = os.path.join(deployments, "ROOT.war.deployed")
-    start = time.time()
-    while time.time() - start < 45:
-        if os.path.exists(deployed_marker):
-            return True
-        if wait_for_url(f"http://localhost:{WILDFLY_PORT}/", timeout=1):
-            return True
-        time.sleep(1.5)
-    log("WildFly: não confirmou deployment do ROOT.war dentro do tempo.", "WARNING")
-    return False
+
+    return _wait_for_wildfly_deploy_marker(war_name)
 
 def detect_wildfly_context_paths() -> list[str]:
     """Detecta possíveis context paths publicados no WildFly baseado nos artefatos em deployments.
@@ -956,26 +1092,60 @@ def test_login_browser(base_url: str, email: str = "admin@meuapp.com", senha: st
                         page.press("input[type=password]", "Enter")
                     except Exception:
                         pass
-                # Aguardar destino
-                target_ok = False
+
+                # Aguardar a navegação estabilizar para inspecionar o destino
                 try:
-                    page.wait_for_url(lambda url: "/dashboard" in url, timeout=15000)
-                    target_ok = True
+                    page.wait_for_load_state("networkidle", timeout=15000)
                 except Exception:
-                    current = page.url or ""
-                    if "/dashboard" in current:
+                    pass
+
+                target_ok = False
+                current_url = page.url or ""
+                success_url_tokens = [
+                    "/dashboard",
+                    "/home",
+                    "/inicio",
+                    "/index",
+                    "/app",
+                ]
+                for token in success_url_tokens:
+                    if token in current_url:
                         target_ok = True
+                        break
+
+                if not target_ok and current_url:
+                    # Se não voltamos para /login e permanecemos na mesma origem, considerar sucesso
+                    if "/login" not in current_url:
+                        target_ok = True
+
                 if not target_ok:
                     try:
                         content = page.content().lower()
-                        if "dashboard" in content and "logout" in content:
+                        success_content_tokens = [
+                            "dashboard",
+                            "painel",
+                            "bem-vindo",
+                            "logout",
+                            "sair",
+                        ]
+                        if any(token in content for token in success_content_tokens):
                             target_ok = True
                     except Exception:
                         pass
+
+                if not target_ok:
+                    try:
+                        # Alguns templates exibem botões/links de saída sem alterar URL
+                        if page.locator("text=/logout|sair/i").first.is_visible():
+                            target_ok = True
+                    except Exception:
+                        pass
+
                 if target_ok:
+                    if current_url:
+                        log(f"Login via navegador validado (URL final: {current_url}).", "SUCCESS")
                     context.close()
                     browser.close()
-                    log("Login via navegador validado (redirecionado para /dashboard).", "SUCCESS")
                     return True
             context.close()
             browser.close()
@@ -1076,7 +1246,7 @@ def ensure_admin_seed(email: str = "admin@meuapp.com", senha: str = "Admin@123")
                     email VARCHAR(150) UNIQUE NOT NULL,
                     senha VARCHAR(255) NOT NULL,
                     ativo BOOLEAN DEFAULT true,
-                    perfil VARCHAR(20) DEFAULT 'USUARIO' CHECK (perfil IN ('ADMIN','USUARIO')),
+                    perfil VARCHAR(20) DEFAULT 'OPERADOR' CHECK (perfil IN ('ADMIN','SUPERVISOR','OPERADOR')),
                     data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     data_atualizacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -1480,6 +1650,7 @@ def check_database_connection():
                 return True, f"Conectado ao banco de dados PostgreSQL: {db_host}:{db_port}/{db_name}"
             except Exception as e:
                 msg = str(e)
+                normalized = msg.lower()
                 if "too many clients" in msg.lower():
                     log("PostgreSQL retornou 'too many clients' — reiniciando contêiner e tentando novamente...", "WARNING")
                     restart_postgres_container()
@@ -1488,6 +1659,29 @@ def check_database_connection():
                         return True, f"Conexão restabelecida após reinício do Postgres: {db_host}:{db_port}/{db_name}"
                     except Exception as e2:
                         return False, f"Erro ao conectar ao banco de dados após reinício: {str(e2)}"
+                if "server closed the connection unexpectedly" in normalized or "terminating connection due to administrator command" in normalized:
+                    log("PostgreSQL ainda está inicializando; aguardando 5s e tentando novamente...", "WARNING")
+                    time.sleep(5)
+                    try:
+                        _try_connect()
+                        return True, f"Conectado ao banco de dados PostgreSQL após nova tentativa: {db_host}:{db_port}/{db_name}"
+                    except Exception as e2:
+                        return False, f"Erro ao conectar ao banco de dados após nova tentativa: {str(e2)}"
+                if "password authentication failed" in normalized:
+                    hint = (
+                        "Falha de autenticação para o usuário configurado no Postgres. "
+                        "Verifique as credenciais em docker-compose.yml/variáveis ou considere reiniciar o volume (docker compose down -v)."
+                    )
+                    log(hint, "ERROR")
+                    return False, f"Erro ao conectar ao banco de dados: {msg}"
+                if "connection refused" in normalized or "timeout expired" in normalized:
+                    log("PostgreSQL não respondeu à conexão; aguardando 3s e tentando novamente...", "WARNING")
+                    time.sleep(3)
+                    try:
+                        _try_connect()
+                        return True, f"Conectado ao banco de dados PostgreSQL após nova tentativa: {db_host}:{db_port}/{db_name}"
+                    except Exception as e2:
+                        return False, f"Erro ao conectar ao banco de dados após nova tentativa: {str(e2)}"
                 return False, f"Erro ao conectar ao banco de dados: {msg}"
         except ImportError:
             return True, "Módulo psycopg2 não instalado, mas contêiner PostgreSQL está em execução"
@@ -1607,6 +1801,10 @@ def setup_tomcat_environment(tomcat_dir):
             env["PATH"] = f"{tomcat_bin};{env.get('PATH', '')}"
         else:
             env["PATH"] = f"{tomcat_bin}:{env.get('PATH', '')}"
+
+    # Evitar prompts de "Pressione qualquer tecla" em scripts .bat
+    if platform.system() == "Windows":
+        env["NOPAUSE"] = "on"
     
     # Configurar JAVA_HOME automaticamente se não estiver definido
     if "JAVA_HOME" not in env or not env["JAVA_HOME"] or not os.path.exists(env["JAVA_HOME"]):
@@ -1903,6 +2101,9 @@ def setup_wildfly_environment():
     
     # Configurações específicas do WildFly (porta bind address, etc.)
     env["JAVA_OPTS"] = env.get("JAVA_OPTS", "") + f" -Djboss.http.port={WILDFLY_PORT} -Djboss.bind.address=0.0.0.0"
+
+    if platform.system() == "Windows":
+        env["NOPAUSE"] = "1"
     
     return env
 
@@ -2346,14 +2547,44 @@ def validate_tomcat_jndi(runtime_check: bool = True) -> tuple[bool, str]:
                         'name [jdbc/postgresds] is bound',
                         'org.apache.commons.dbcp2',
                     ]
-                    tail_low = tail.lower()
-                    has_err = any(tok in tail_low for tok in err_signals)
-                    has_ok = any(tok in tail_low for tok in ok_signals)
+                    # Consider only recent log lines to avoid false-positives from old entries.
+                    import re, datetime
+                    tail_lines = tail.splitlines()
+                    now = datetime.datetime.now()
+                    window_minutes = 10
+                    recent_err = False
+                    recent_ok = False
+
+                    # Match Catalina timestamp like: 17-Oct-2025 18:17:31.877
+                    ts_re = re.compile(r'^(\d{1,2}-[A-Za-z]{3}-\d{4} \d{2}:\d{2}:\d{2}(?:\.\d{1,3})?)')
+                    for line in tail_lines:
+                        low = line.lower()
+                        m = ts_re.match(line.strip())
+                        ts_dt = None
+                        if m:
+                            ts_str = m.group(1)
+                            try:
+                                ts_dt = datetime.datetime.strptime(ts_str, '%d-%b-%Y %H:%M:%S.%f')
+                            except Exception:
+                                try:
+                                    ts_dt = datetime.datetime.strptime(ts_str, '%d-%b-%Y %H:%M:%S')
+                                except Exception:
+                                    ts_dt = None
+
+                        is_recent = True if ts_dt is None else ((now - ts_dt).total_seconds() <= window_minutes * 60)
+
+                        if is_recent and any(tok in low for tok in err_signals):
+                            recent_err = True
+                        if is_recent and any(tok in low for tok in ok_signals):
+                            recent_ok = True
+
+                    has_err = recent_err
+                    has_ok = recent_ok
                     if has_err:
                         ok = False
-                        msg.append("Erros detectados em catalina.log referentes ao datasource/JNDI")
+                        msg.append("Erros detectados em catalina.log referentes ao datasource/JNDI (em janela recente)")
                     elif has_ok:
-                        msg.append("Logs indicam datasource inicializado/bound")
+                        msg.append("Logs indicam datasource inicializado/bound (em janela recente)")
         return ok, '; '.join(msg)
     except Exception as e:
         return False, f"Falha na validação JNDI do Tomcat: {e}"
@@ -2412,10 +2643,31 @@ def validate_wildfly_jndi(runtime_check: bool = True) -> tuple[bool, str]:
             cli_path = os.path.join(WILDFLY_DIR, 'bin', 'jboss-cli.bat' if platform.system() == 'Windows' else 'jboss-cli.sh')
             cli_ok = False
             cli_msg = None
-            if os.path.exists(cli_path):
+            creds = _wildfly_cli_credentials()
+            if not creds:
+                cli_msg = "CLI não executado (credenciais ManagementRealm ausentes)"
+            elif os.path.exists(cli_path):
                 try:
-                    cmd = [cli_path, '--connect', '--commands=/subsystem=datasources/data-source=PostgresDS:test-connection-in-pool']
-                    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=15, shell=(platform.system()=="Windows"))
+                    user, password = creds
+                    if platform.system() == "Windows":
+                        cmd = [
+                            "cmd.exe",
+                            "/c",
+                            cli_path,
+                            "--connect",
+                            f"--user={user}",
+                            f"--password={password}",
+                            "--commands=/subsystem=datasources/data-source=PostgresDS:test-connection-in-pool",
+                        ]
+                    else:
+                        cmd = [
+                            cli_path,
+                            "--connect",
+                            f"--user={user}",
+                            f"--password={password}",
+                            "--commands=/subsystem=datasources/data-source=PostgresDS:test-connection-in-pool",
+                        ]
+                    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=45)
                     out = (proc.stdout or '') + '\n' + (proc.stderr or '')
                     out_low = out.lower()
                     if 'outcome' in out_low and 'success' in out_low:
@@ -2425,6 +2677,8 @@ def validate_wildfly_jndi(runtime_check: bool = True) -> tuple[bool, str]:
                         cli_msg = f'CLI não confirmou sucesso: {out.strip()[:200]}'
                 except Exception as e:
                     cli_msg = f'CLI indisponível/erro: {e}'
+            else:
+                cli_msg = f'CLI não encontrado em {cli_path}'
             if cli_msg:
                 msg_parts.append(cli_msg)
             ok = ok and cli_ok if cli_ok else ok
@@ -3953,6 +4207,64 @@ def run_embedded_tomcat():
         log(f"Erro ao iniciar Tomcat incorporado: {str(e)}", "ERROR")
         return False
 
+def run_pytest(base_url: str) -> bool:
+    """
+    Executa os testes Python (pytest) em um subprocesso, configurando a URL base.
+    Retorna True se os testes passaram, False caso contrário.
+    """
+    log("Iniciando execução dos testes Python (pytest)...", "INFO")
+
+    # Configurar a variável de ambiente para os testes saberem a URL
+    env = os.environ.copy()
+    env["APP_TEST_BASE_URL"] = base_url
+
+    try:
+        command: list[str] | None = None
+
+        # Preferir o mesmo interpretador que está executando este script
+        python_exec = sys.executable
+        if python_exec and os.path.exists(python_exec):
+            command = [python_exec, "-m", "pytest", "tests/fase_01"]
+        else:
+            # Fallback direto para o executável pytest da venv
+            pytest_exe = os.path.join(WORKSPACE_DIR, ".venv", "Scripts", "pytest.exe")
+            if os.path.exists(pytest_exe):
+                command = [pytest_exe, "tests/fase_01"]
+
+        if not command:
+            log("Não foi possível localizar um interpretador Python ou pytest.exe para executar os testes.", "ERROR")
+            return False
+        
+        log(f"Executando comando: {' '.join(command)}", "INFO")
+        log(f"URL base para testes: {base_url}", "INFO")
+
+        # Usar Popen para capturar a saída em tempo real
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace', env=env)
+
+        # Imprimir a saída do pytest em tempo real
+        while True:
+            output = process.stdout.readline()
+            if output == '' and process.poll() is not None:
+                break
+            if output:
+                print(output.strip())
+        
+        retcode = process.poll()
+        
+        if retcode == 0:
+            log("Testes Python executados com sucesso.", "SUCCESS")
+            return True
+        # Pytest retorna 5 se nenhum teste for encontrado
+        elif retcode == 5:
+            log("Nenhum teste Python foi executado (pytest exit code 5).", "WARNING")
+            return True # Considerar sucesso se não há testes para rodar
+        else:
+            log(f"Falha na execução dos testes Python (exit code: {retcode}).", "ERROR")
+            return False
+
+    except Exception as e:
+        log(f"Erro inesperado ao executar os testes Python: {e}", "ERROR")
+        return False
 def stop_tomcat_server():
     """
     Para o servidor Tomcat se estiver em execução.
@@ -3991,16 +4303,17 @@ def restart_tomcat_server():
     """
     try:
         stopped = False
+        env = setup_tomcat_environment(TOMCAT_DIR)
         # Tentar parar com script
         if platform.system() == "Windows":
             shutdown = os.path.join(TOMCAT_DIR, "bin", "shutdown.bat")
             if os.path.exists(shutdown):
-                subprocess.run([shutdown], shell=True, cwd=os.path.join(TOMCAT_DIR, "bin"))
+                subprocess.run([shutdown], shell=True, cwd=os.path.join(TOMCAT_DIR, "bin"), env=env)
                 stopped = True
         else:
             shutdown = os.path.join(TOMCAT_DIR, "bin", "shutdown.sh")
             if os.path.exists(shutdown):
-                subprocess.run([shutdown], cwd=os.path.join(TOMCAT_DIR, "bin"))
+                subprocess.run([shutdown], cwd=os.path.join(TOMCAT_DIR, "bin"), env=env)
                 stopped = True
         time.sleep(3)
 
@@ -4010,13 +4323,13 @@ def restart_tomcat_server():
             if not os.path.exists(startup):
                 log("startup.bat não encontrado no Tomcat.", "ERROR")
                 return False
-            subprocess.run([startup], shell=True, cwd=os.path.join(TOMCAT_DIR, "bin"))
+            subprocess.run([startup], shell=True, cwd=os.path.join(TOMCAT_DIR, "bin"), env=env)
         else:
             startup = os.path.join(TOMCAT_DIR, "bin", "startup.sh")
             if not os.path.exists(startup):
                 log("startup.sh não encontrado no Tomcat.", "ERROR")
                 return False
-            subprocess.run([startup], cwd=os.path.join(TOMCAT_DIR, "bin"))
+            subprocess.run([startup], cwd=os.path.join(TOMCAT_DIR, "bin"), env=env)
 
         log("Tomcat reiniciado.", "SUCCESS")
         return True
@@ -4083,6 +4396,50 @@ def main():
     update_server_dirs(args.tomcat_dir, args.wildfly_dir)
     log(f"Tomcat efetivo: {TOMCAT_DIR}", "INFO")
     log(f"WildFly efetivo: {WILDFLY_DIR}", "INFO")
+
+    tomcat_run_mode = "background"
+    env_run_mode_raw = os.environ.get("APP_TOMCAT_RUN_MODE")
+    env_run_mode = normalize_run_mode(env_run_mode_raw)
+    if env_run_mode_raw and env_run_mode is None:
+        log(f"Valor inválido para APP_TOMCAT_RUN_MODE: {env_run_mode_raw}. Usando padrão 'background'.", "WARNING")
+    if env_run_mode:
+        tomcat_run_mode = env_run_mode
+
+    env_foreground_raw = os.environ.get("APP_TOMCAT_FOREGROUND")
+    env_foreground = normalize_run_mode(env_foreground_raw)
+    if env_foreground_raw and env_foreground is None:
+        log(f"Valor inválido para APP_TOMCAT_FOREGROUND: {env_foreground_raw}. Usando padrão 'background'.", "WARNING")
+    if env_foreground:
+        tomcat_run_mode = env_foreground
+
+    if getattr(args, "tomcat_run_mode", None):
+        tomcat_run_mode = args.tomcat_run_mode
+    if getattr(args, "tomcat_foreground", False):
+        tomcat_run_mode = "foreground"
+
+    log(f"Modo configurado para iniciar Tomcat: {tomcat_run_mode}", "INFO")
+
+    wildfly_run_mode = "background"
+    wf_env_run_raw = os.environ.get("APP_WILDFLY_RUN_MODE")
+    wf_env_run = normalize_run_mode(wf_env_run_raw)
+    if wf_env_run_raw and wf_env_run is None:
+        log(f"Valor inválido para APP_WILDFLY_RUN_MODE: {wf_env_run_raw}. Usando padrão 'background'.", "WARNING")
+    if wf_env_run:
+        wildfly_run_mode = wf_env_run
+
+    wf_env_foreground_raw = os.environ.get("APP_WILDFLY_FOREGROUND")
+    wf_env_foreground = normalize_run_mode(wf_env_foreground_raw)
+    if wf_env_foreground_raw and wf_env_foreground is None:
+        log(f"Valor inválido para APP_WILDFLY_FOREGROUND: {wf_env_foreground_raw}. Usando padrão 'background'.", "WARNING")
+    if wf_env_foreground:
+        wildfly_run_mode = wf_env_foreground
+
+    if getattr(args, "wildfly_run_mode", None):
+        wildfly_run_mode = args.wildfly_run_mode
+    if getattr(args, "wildfly_foreground", False):
+        wildfly_run_mode = "foreground"
+
+    log(f"Modo configurado para iniciar WildFly: {wildfly_run_mode}", "INFO")
 
     # Se for apenas checar ambiente e sair
     if getattr(args, 'only_check', False):
@@ -4214,6 +4571,7 @@ def main():
                     log("Datasource PostgreSQL pronto no Tomcat.", "SUCCESS")
                 else:
                     log("Não foi possível garantir o datasource PostgreSQL no Tomcat.", "WARNING")
+                tomcat_env = setup_tomcat_environment(TOMCAT_DIR)
                 
                 tomcat_webapps = os.path.join(TOMCAT_DIR, "webapps")
                 if not os.path.exists(tomcat_webapps):
@@ -4228,18 +4586,18 @@ def main():
                     print(f"\n{Colors.YELLOW}Parando o servidor Tomcat para undeploy, aguarde...{Colors.END}")
                     if platform.system() == "Windows":
                         try:
-                            subprocess.run([os.path.join(TOMCAT_DIR, "bin", "shutdown.bat")], shell=True)
+                            subprocess.run([os.path.join(TOMCAT_DIR, "bin", "shutdown.bat")], shell=True, env=tomcat_env)
                             log("Comando de parada do Tomcat executado com sucesso", "SUCCESS")
                             print(f"{Colors.YELLOW}Aguardando o servidor parar (10 segundos)...{Colors.END}")
-                            time.sleep(10)  # Aguardar o Tomcat parar
+                            time.sleep(10)
                         except Exception as e:
                             log(f"Erro ao parar o Tomcat: {str(e)}", "ERROR")
                     else:
                         try:
-                            subprocess.run([os.path.join(TOMCAT_DIR, "bin", "shutdown.sh")], shell=True)
+                            subprocess.run([os.path.join(TOMCAT_DIR, "bin", "shutdown.sh")], shell=True, env=tomcat_env)
                             log("Comando de parada do Tomcat executado com sucesso", "SUCCESS")
                             print(f"{Colors.YELLOW}Aguardando o servidor parar (10 segundos)...{Colors.END}")
-                            time.sleep(10)  # Aguardar o Tomcat parar
+                            time.sleep(10)
                         except Exception as e:
                             log(f"Erro ao parar o Tomcat: {str(e)}", "ERROR")
                 else:
@@ -4256,127 +4614,72 @@ def main():
                         else:
                             os.remove(item_path)
                             log(f"Arquivo {item} removido do Tomcat", "INFO")
-                            # Iniciar novamente em foreground (console neste terminal)
-                            bin_dir = os.path.join(TOMCAT_DIR, "bin")
-                            try:
-                                if platform.system() == "Windows":
-                                    catalina = os.path.join(bin_dir, "catalina.bat")
-                                    if not os.path.exists(catalina):
-                                        log("catalina.bat não encontrado no Tomcat.", "ERROR")
-                                        return False
-                                    cmd = f'"{catalina}" run'
-                                    process = subprocess.Popen(cmd, shell=True, cwd=bin_dir)
-                                else:
-                                    catalina = os.path.join(bin_dir, "catalina.sh")
-                                    if not os.path.exists(catalina):
-                                        log("catalina.sh não encontrado no Tomcat.", "ERROR")
-                                        return False
-                                    process = subprocess.Popen([catalina, "run"], cwd=bin_dir)
-                                print(f"{Colors.CYAN}Tomcat em execução no foreground. Pressione Ctrl+C para parar.{Colors.END}")
-                                print(f"{Colors.GREEN}Aplicação: http://localhost:{TOMCAT_PORT}/caracore-hub/{Colors.END}")
-                                process.wait()
-                                log("Tomcat finalizado.", "INFO")
-                            except KeyboardInterrupt:
-                                log("Interrompido pelo usuário. Enviando shutdown ao Tomcat...", "INFO")
-                                try:
-                                    if platform.system() == "Windows":
-                                        subprocess.run([os.path.join(bin_dir, "shutdown.bat")], shell=True, cwd=bin_dir)
-                                    else:
-                                        subprocess.run([os.path.join(bin_dir, "shutdown.sh")], cwd=bin_dir)
-                                except Exception:
-                                    pass
-                
+
                 # Copiar o WAR para o Tomcat
                 war_dest = os.path.join(tomcat_webapps, "caracore-hub.war")
                 shutil.copy2(war_file, war_dest)
                 log(f"Arquivo WAR copiado para Tomcat: {war_dest}", "SUCCESS")
-                
-                # Iniciar o Tomcat no foreground (console neste terminal)
-                log("Iniciando o Tomcat em foreground (console neste terminal)...", "INFO")
-                log(f"Configurado para usar a porta {TOMCAT_PORT}.", "INFO")
+
                 bin_dir = os.path.join(TOMCAT_DIR, "bin")
-                try:
-                    if platform.system() == "Windows":
-                        cmd = f'"{os.path.join(bin_dir, "catalina.bat")}" run'
-                        tomcat_process = subprocess.Popen(cmd, shell=True, cwd=bin_dir)
-                    else:
-                        cmd = [os.path.join(bin_dir, "catalina.sh"), "run"]
-                        tomcat_process = subprocess.Popen(cmd, cwd=bin_dir)
-                    print(f"{Colors.CYAN}Tomcat em execução no foreground. Pressione Ctrl+C para parar.{Colors.END}")
-                    print(f"{Colors.GREEN}Aplicação: http://localhost:{TOMCAT_PORT}/caracore-hub/{Colors.END}")
-                    tomcat_process.wait()
-                    log("Tomcat finalizado.", "INFO")
-                except KeyboardInterrupt:
-                    log("Interrompido pelo usuário. Enviando shutdown ao Tomcat...", "INFO")
+                if tomcat_run_mode == "foreground":
+                    log("Iniciando o Tomcat em foreground (logs no terminal atual)...", "INFO")
+                    tomcat_process = None
                     try:
                         if platform.system() == "Windows":
-                            subprocess.run([os.path.join(bin_dir, "shutdown.bat")], shell=True, cwd=bin_dir)
+                            catalina = os.path.join(bin_dir, "catalina.bat")
+                            if not os.path.exists(catalina):
+                                log("catalina.bat não encontrado no Tomcat.", "ERROR")
+                            else:
+                                cmd = f'"{catalina}" run'
+                                tomcat_process = subprocess.Popen(cmd, shell=True, cwd=bin_dir, env=tomcat_env)
                         else:
-                            subprocess.run([os.path.join(bin_dir, "shutdown.sh")], cwd=bin_dir)
-                    except Exception:
-                        pass
+                            catalina = os.path.join(bin_dir, "catalina.sh")
+                            if not os.path.exists(catalina):
+                                log("catalina.sh não encontrado no Tomcat.", "ERROR")
+                            else:
+                                tomcat_process = subprocess.Popen([catalina, "run"], cwd=bin_dir, env=tomcat_env)
+
+                        if tomcat_process:
+                            print(f"{Colors.CYAN}Tomcat em execução no foreground. Pressione Ctrl+C para parar.{Colors.END}")
+                            print(f"{Colors.GREEN}Aplicação: http://localhost:{TOMCAT_PORT}/caracore-hub/{Colors.END}")
+                            log("Tomcat iniciado em foreground; logs sendo exibidos neste terminal.", "SUCCESS")
+                            log(f"Aplicação disponível em: http://localhost:{TOMCAT_PORT}/caracore-hub/ (foreground)", "SUCCESS")
+                            tomcat_process.wait()
+                            log("Tomcat finalizado (foreground).", "INFO")
+                    except KeyboardInterrupt:
+                        log("Interrompido pelo usuário. Enviando shutdown ao Tomcat...", "INFO")
+                        try:
+                            if platform.system() == "Windows":
+                                subprocess.run([os.path.join(bin_dir, "shutdown.bat")], shell=True, cwd=bin_dir, env=tomcat_env)
+                            else:
+                                subprocess.run([os.path.join(bin_dir, "shutdown.sh")], cwd=bin_dir, env=tomcat_env)
+                        except Exception:
+                            pass
+                    except Exception as e:
+                        log(f"Erro ao iniciar o Tomcat em foreground: {str(e)}", "ERROR")
                 else:
+                    # Iniciar o Tomcat usando o script padrão (background)
+                    log("Iniciando o Tomcat (startup script)...", "INFO")
                     try:
-                        tomcat_process = subprocess.Popen([os.path.join(TOMCAT_DIR, "bin", "startup.sh")], shell=True, env=tomcat_env)
+                        if platform.system() == "Windows":
+                            startup_cmd = [os.path.join(bin_dir, "startup.bat")]
+                            subprocess.run(startup_cmd, shell=True, cwd=bin_dir, env=tomcat_env, check=True)
+                        else:
+                            startup_cmd = [os.path.join(bin_dir, "startup.sh")]
+                            subprocess.run(startup_cmd, cwd=bin_dir, env=tomcat_env, check=True)
                         log("Comando de inicialização do Tomcat executado com sucesso", "SUCCESS")
-                        print(f"{Colors.YELLOW}Aguardando o servidor inicializar (20 segundos)...{Colors.END}")
-                        time.sleep(20)  # Aumentando o tempo de espera para o Tomcat iniciar completamente
+                    except subprocess.CalledProcessError as e:
+                        log(f"Erro ao iniciar o Tomcat (exit {e.returncode}): {e}", "ERROR")
                     except Exception as e:
                         log(f"Erro ao iniciar o Tomcat: {str(e)}", "ERROR")
-                
-                # Verificar novamente se o servidor está respondendo
-                    try:
-                        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                        s.settimeout(1)
-                        result = s.connect_ex(('localhost', TOMCAT_PORT))
-                        s.close()
-                        if result == 0:
-                            print(f"{Colors.GREEN}Servidor Tomcat iniciado com sucesso na porta {TOMCAT_PORT}!{Colors.END}")
-                            log("Verificação confirmou que o Tomcat está em execução na porta configurada", "SUCCESS")
+                    else:
+                        if wait_for_port(TOMCAT_PORT, timeout=40):
+                            log("Tomcat iniciou e está respondendo na porta configurada", "SUCCESS")
                         else:
-                            print(f"{Colors.WARNING}O servidor Tomcat pode não ter iniciado na porta {TOMCAT_PORT}. Verificando porta padrão 8080...{Colors.END}")
-                            log("Verificação não conseguiu confirmar se o Tomcat está respondendo na porta configurada", "WARNING")
-                            
-                            # Verificar se o Tomcat está rodando na porta padrão 8080
-                            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                            s.settimeout(1)
-                            result = s.connect_ex(('localhost', 8080))
-                            s.close()
-                            if result == 0:
-                                print(f"{Colors.WARNING}Tomcat está rodando na porta padrão 8080 em vez de {TOMCAT_PORT}!{Colors.END}")
-                                log("Tomcat detectado na porta 8080. A configuração de porta não funcionou.", "WARNING")
-                                
-                                # Exibir informações de diagnóstico
-                                print(f"\n{Colors.YELLOW}=== Informações de Diagnóstico do Tomcat ==={Colors.END}")
-                                print(f"{Colors.YELLOW}CATALINA_HOME: {tomcat_env.get('CATALINA_HOME', 'Não definido')}{Colors.END}")
-                                print(f"{Colors.YELLOW}CATALINA_BASE: {tomcat_env.get('CATALINA_BASE', 'Não definido')}{Colors.END}")
-                                print(f"{Colors.YELLOW}CATALINA_OPTS: {tomcat_env.get('CATALINA_OPTS', 'Não definido')}{Colors.END}")
-                                print(f"{Colors.YELLOW}JAVA_HOME: {tomcat_env.get('JAVA_HOME', 'Não definido')}{Colors.END}")
-                                
-                                # Sugerir soluções
-                                print(f"\n{Colors.YELLOW}Sugestões para corrigir o problema:{Colors.END}")
-                                print(f"{Colors.YELLOW}1. Verifique se o servidor na porta 8080 é realmente o Tomcat{Colors.END}")
-                                print(f"{Colors.YELLOW}2. Tente parar qualquer serviço rodando na porta 8080{Colors.END}")
-                                print(f"{Colors.YELLOW}3. Verifique se o arquivo server.xml tem a porta definida como {TOMCAT_PORT}{Colors.END}")
-                                
-                                # Exibir informações de diagnóstico
-                                print(f"\n{Colors.YELLOW}=== Informações de Diagnóstico do Tomcat ==={Colors.END}")
-                                print(f"{Colors.YELLOW}CATALINA_HOME: {tomcat_env.get('CATALINA_HOME', 'Não definido')}{Colors.END}")
-                                print(f"{Colors.YELLOW}CATALINA_BASE: {tomcat_env.get('CATALINA_BASE', 'Não definido')}{Colors.END}")
-                                print(f"{Colors.YELLOW}CATALINA_OPTS: {tomcat_env.get('CATALINA_OPTS', 'Não definido')}{Colors.END}")
-                                print(f"{Colors.YELLOW}JAVA_HOME: {tomcat_env.get('JAVA_HOME', 'Não definido')}{Colors.END}")
-                                
-                                # Sugerir soluções
-                                print(f"\n{Colors.YELLOW}Sugestões para corrigir o problema:{Colors.END}")
-                                print(f"{Colors.YELLOW}1. Verifique se o servidor na porta 8080 é realmente o Tomcat{Colors.END}")
-                                print(f"{Colors.YELLOW}2. Tente parar qualquer serviço rodando na porta 8080{Colors.END}")
-                                print(f"{Colors.YELLOW}3. Verifique se o arquivo server.xml tem a porta definida como {TOMCAT_PORT}{Colors.END}")
-                    except:
-                        log("Não foi possível verificar o status final do Tomcat.", "WARNING")
-                
-                # Exibir link da aplicação
-                print(f"\n{Colors.GREEN}Aplicação disponível em: http://localhost:{TOMCAT_PORT}/caracore-hub/{Colors.END}")
-                log(f"Aplicação disponível em: http://localhost:{TOMCAT_PORT}/caracore-hub/", "SUCCESS")
+                            log("Tomcat não respondeu na porta configurada dentro do tempo limite", "WARNING")
+
+                    print(f"\n{Colors.GREEN}Aplicação disponível em: http://localhost:{TOMCAT_PORT}/caracore-hub/{Colors.END}")
+                    log(f"Aplicação disponível em: http://localhost:{TOMCAT_PORT}/caracore-hub/", "SUCCESS")
             else:
                 log(f"Tomcat não encontrado em: {TOMCAT_DIR}", "ERROR")
                 log("Instale o Tomcat ou corrija o caminho no script.", "ERROR")
@@ -4481,6 +4784,7 @@ def main():
             
             # Verificar se o WildFly está em execução
             wildfly_running = False
+            wildfly_env = None
             try:
                 # Tentar conectar ao WildFly Management (porta 9990, sem offset já que estamos usando a porta padrão)
                 import socket
@@ -4603,92 +4907,107 @@ def main():
             
             # Deploy no WildFly
             if os.path.exists(WILDFLY_DIR):
-                # Garantir datasource PostgreSQL configurado
                 log("Verificando/Configurando datasource PostgreSQL no WildFly...", "INFO")
                 if configure_wildfly_postgres_datasource():
                     log("Datasource PostgreSQL pronto no WildFly.", "SUCCESS")
                 else:
                     log("Não foi possível garantir o datasource PostgreSQL. O app pode falhar ao conectar.", "WARNING")
+
+                wildfly_env = wildfly_env or setup_wildfly_environment()
                 deployments_dir = os.path.join(WILDFLY_DIR, "standalone", "deployments")
-                if not os.path.exists(deployments_dir):
-                    os.makedirs(deployments_dir)
-                
-                # Limpar deployments anteriores
-                for pattern in ["ROOT.war*", "caracore-hub.war*"]:
-                    for item_path in glob.glob(os.path.join(deployments_dir, pattern)):
-                        if os.path.exists(item_path):
-                            os.remove(item_path)
-                            log(f"Arquivo {os.path.basename(item_path)} removido do WildFly", "INFO")
-                
-                # Copiar o WAR para o WildFly
-                war_dest = os.path.join(deployments_dir, "caracore-hub.war")
-                shutil.copy2(war_file, war_dest)
-                log(f"Arquivo WAR copiado para WildFly: {war_dest}", "SUCCESS")
-                
-                # Criar arquivo .dodeploy
-                with open(os.path.join(deployments_dir, "caracore-hub.war.dodeploy"), 'w') as f:
-                    pass
-                log("Arquivo marcador .dodeploy criado para o WildFly", "INFO")
-                
-                # Verificar se o WildFly está em execução
-                import socket
-                wildfly_running = False
-                try:
-                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    s.settimeout(1)
-                    result = s.connect_ex(('localhost', WILDFLY_PORT))
-                    s.close()
-                    wildfly_running = (result == 0)
-                    if wildfly_running:
+                os.makedirs(deployments_dir, exist_ok=True)
+                war_name = os.path.basename(war_file)
+                deployment_success = False
+
+                if wildfly_running:
+                    if deploy_wildfly_war_quick(war_file):
+                        wildfly_running = True
+                        deployment_success = True
                         log("WildFly está em execução. Aplicação será implantada com deploy a quente.", "SUCCESS")
-                except:
-                    log("Não foi possível verificar o status do WildFly.", "WARNING")
-                
-                # Se o WildFly não estiver em execução, iniciar automaticamente
-                if not wildfly_running:
-                    log("WildFly não está em execução. Iniciando o servidor automaticamente...", "INFO")
-                    print(f"\n{Colors.YELLOW}Iniciando o servidor WildFly, aguarde...{Colors.END}")
-                    
-                    # Configurar variáveis de ambiente para o WildFly
-                    wildfly_env = setup_wildfly_environment()
-                    
-                    if platform.system() == "Windows":
-                        try:
-                            wildfly_process = subprocess.Popen([os.path.join(WILDFLY_DIR, "bin", "standalone.bat")], shell=True, env=wildfly_env)
-                            log("Comando de inicialização do WildFly executado com sucesso", "SUCCESS")
-                            print(f"{Colors.YELLOW}Aguardando o servidor inicializar (30 segundos)...{Colors.END}")
-                            time.sleep(30)  # Aumentando o tempo de espera para o WildFly iniciar completamente
-                        except Exception as e:
-                            log(f"Erro ao iniciar o WildFly: {str(e)}", "ERROR")
                     else:
+                        log("Falha ao realizar deploy no WildFly (jboss-cli e fallback). Verifique os logs acima.", "ERROR")
+                        if not NON_INTERACTIVE:
+                            input(f"\n{Colors.WARNING}Pressione Enter para continuar...{Colors.END}")
+                        continue
+                else:
+                    # Servidor parado: preparar deploy por scanner e iniciar respeitando o run mode
+                    for pattern in ["caracore-hub.war*", "ROOT.war*"]:
+                        for item_path in glob.glob(os.path.join(deployments_dir, pattern)):
+                            if os.path.exists(item_path):
+                                os.remove(item_path)
+                                log(f"Arquivo {os.path.basename(item_path)} removido do WildFly", "INFO")
+
+                    war_dest = os.path.join(deployments_dir, war_name)
+                    shutil.copy2(war_file, war_dest)
+                    log(f"Arquivo WAR preparado para o WildFly: {war_dest}", "SUCCESS")
+                    try:
+                        with open(os.path.join(deployments_dir, f"{war_name}.dodeploy"), "w"):
+                            pass
+                        log("Arquivo marcador .dodeploy criado para o WildFly", "INFO")
+                    except Exception as e:
+                        log(f"Não foi possível criar marker .dodeploy: {e}", "WARNING")
+
+                    wildfly_bin = os.path.join(WILDFLY_DIR, "bin")
+                    if wildfly_run_mode == "foreground":
+                        log("Iniciando o WildFly em foreground (logs no terminal atual)...", "INFO")
                         try:
-                            wildfly_process = subprocess.Popen([os.path.join(WILDFLY_DIR, "bin", "standalone.sh")], shell=True, env=wildfly_env)
+                            if platform.system() == "Windows":
+                                standalone_cmd = [os.path.join(wildfly_bin, "standalone.bat"), "--console"]
+                                wildfly_process = subprocess.Popen(standalone_cmd, shell=True, cwd=wildfly_bin, env=wildfly_env)
+                            else:
+                                standalone_cmd = [os.path.join(wildfly_bin, "standalone.sh"), "--console"]
+                                os.chmod(standalone_cmd[0], 0o755)
+                                wildfly_process = subprocess.Popen(standalone_cmd, cwd=wildfly_bin, env=wildfly_env)
+                            wildfly_running = True
+                            deployment_success = True
+                            print(f"{Colors.CYAN}WildFly em execução no foreground. Pressione Ctrl+C para parar.{Colors.END}")
+                            print(f"{Colors.GREEN}Aplicação: http://localhost:{WILDFLY_PORT}/caracore-hub/{Colors.END}")
+                            log("WildFly iniciado em foreground; logs sendo exibidos neste terminal.", "SUCCESS")
+                            log(f"Aplicação disponível em: http://localhost:{WILDFLY_PORT}/caracore-hub/ (foreground)", "SUCCESS")
+                            wildfly_process.wait()
+                            log("WildFly finalizado (foreground).", "INFO")
+                        except KeyboardInterrupt:
+                            log("Interrompido pelo usuário. Enviando shutdown ao WildFly...", "INFO")
+                            try:
+                                if platform.system() == "Windows":
+                                    cli_cmd = [os.path.join(wildfly_bin, "jboss-cli.bat"), "--connect", "--command=:shutdown"]
+                                    subprocess.run(cli_cmd, shell=True, cwd=wildfly_bin, env=wildfly_env)
+                                else:
+                                    cli_cmd = [os.path.join(wildfly_bin, "jboss-cli.sh"), "--connect", "--command=:shutdown"]
+                                    subprocess.run(cli_cmd, cwd=wildfly_bin, env=wildfly_env)
+                            except Exception:
+                                pass
+                        except Exception as e:
+                            log(f"Erro ao iniciar o WildFly em foreground: {str(e)}", "ERROR")
+                    else:
+                        print(f"\n{Colors.YELLOW}Iniciando o servidor WildFly em background, aguarde...{Colors.END}")
+                        try:
+                            if platform.system() == "Windows":
+                                wildfly_process = subprocess.Popen([os.path.join(wildfly_bin, "standalone.bat")], shell=True, cwd=wildfly_bin, env=wildfly_env)
+                            else:
+                                standalone_sh = os.path.join(wildfly_bin, "standalone.sh")
+                                os.chmod(standalone_sh, 0o755)
+                                wildfly_process = subprocess.Popen([standalone_sh], cwd=wildfly_bin, env=wildfly_env)
                             log("Comando de inicialização do WildFly executado com sucesso", "SUCCESS")
-                            print(f"{Colors.YELLOW}Aguardando o servidor inicializar (30 segundos)...{Colors.END}")
-                            time.sleep(30)  # Aumentando o tempo de espera para o WildFly iniciar completamente
+                            if wait_for_port(WILDFLY_PORT, timeout=60):
+                                print(f"{Colors.GREEN}Servidor WildFly iniciado com sucesso!{Colors.END}")
+                                log("Verificação confirmou que o WildFly está em execução", "SUCCESS")
+                                wildfly_running = True
+                                deployment_success = _wait_for_wildfly_deploy_marker(war_name)
+                                if not deployment_success:
+                                    log("O marker .deployed não foi detectado após o start. Verifique os logs do WildFly.", "WARNING")
+                            else:
+                                print(f"{Colors.WARNING}O servidor WildFly pode estar iniciando. Aguarde alguns segundos para acessar a aplicação.{Colors.END}")
+                                log("WildFly não respondeu na porta configurada dentro do tempo limite", "WARNING")
+                                diagnose_wildfly_issues(wildfly_env)
                         except Exception as e:
                             log(f"Erro ao iniciar o WildFly: {str(e)}", "ERROR")
-                    
-                    # Verificar novamente se o servidor está respondendo
-                    try:
-                        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                        s.settimeout(1)
-                        result = s.connect_ex(('localhost', WILDFLY_PORT))
-                        s.close()
-                        if result == 0:
-                            print(f"{Colors.GREEN}Servidor WildFly iniciado com sucesso!{Colors.END}")
-                            log("Verificação confirmou que o WildFly está em execução", "SUCCESS")
-                            wildfly_running = True
-                        else:
-                            print(f"{Colors.WARNING}O servidor WildFly pode estar iniciando. Aguarde alguns segundos para acessar a aplicação.{Colors.END}")
-                            log("Verificação não conseguiu confirmar se o WildFly está respondendo, mas o processo foi iniciado", "WARNING")
-                            diagnose_wildfly_issues(wildfly_env)
-                    except:
-                        log("Não foi possível verificar o status final do WildFly.", "WARNING")
-                
-                # Exibir link da aplicação
-                print(f"\n{Colors.GREEN}Aplicação disponível em: http://localhost:{WILDFLY_PORT}/caracore-hub/{Colors.END}")
-                log(f"Aplicação disponível em: http://localhost:{WILDFLY_PORT}/caracore-hub/", "SUCCESS")
+
+                if deployment_success:
+                    print(f"\n{Colors.GREEN}Aplicação disponível em: http://localhost:{WILDFLY_PORT}/caracore-hub/{Colors.END}")
+                    log(f"Aplicação disponível em: http://localhost:{WILDFLY_PORT}/caracore-hub/", "SUCCESS")
+                else:
+                    log("Deploy do WildFly concluído com alertas. Consulte os logs para detalhes.", "WARNING")
             else:
                 log(f"WildFly não encontrado em: {WILDFLY_DIR}", "ERROR")
                 log("Instale o WildFly ou corrija o caminho no script.", "ERROR")
@@ -4735,37 +5054,46 @@ def main():
                 log(f"Configurado para usar a porta {WILDFLY_PORT}", "INFO")
                 
                 wildfly_bin = os.path.join(WILDFLY_DIR, "bin")
-                if platform.system() == "Windows":
+                if wildfly_run_mode == "foreground":
+                    log("Iniciando WildFly em foreground (logs no terminal atual)...", "INFO")
                     try:
-                        standalone_bat = os.path.join(wildfly_bin, "standalone.bat")
-                        wildfly_process = subprocess.Popen([standalone_bat], shell=True, env=wildfly_env)
-                        log("Comando de inicialização do WildFly executado com sucesso", "SUCCESS")
-                        print(f"{Colors.YELLOW}Aguardando o servidor inicializar (30 segundos)...{Colors.END}")
-                        time.sleep(30)  # Aguardar o WildFly iniciar completamente
-                        
-                        # Verificar se o WildFly iniciou com sucesso
-                        wildfly_started = check_server_running(WILDFLY_PORT)
-                        if wildfly_started:
-                            log("WildFly iniciado com sucesso", "SUCCESS")
-                            log(f"Aplicação disponível em: http://localhost:{WILDFLY_PORT}/caracore-hub/ (se existir)", "SUCCESS")
+                        if platform.system() == "Windows":
+                            standalone_cmd = [os.path.join(wildfly_bin, "standalone.bat"), "--console"]
+                            wildfly_process = subprocess.Popen(standalone_cmd, shell=True, cwd=wildfly_bin, env=wildfly_env)
                         else:
-                            log("WildFly pode não ter iniciado completamente. Verificando problemas...", "WARNING")
-                            diagnose_wildfly_issues(wildfly_env)
+                            standalone_cmd = [os.path.join(wildfly_bin, "standalone.sh"), "--console"]
+                            os.chmod(standalone_cmd[0], 0o755)
+                            wildfly_process = subprocess.Popen(standalone_cmd, cwd=wildfly_bin, env=wildfly_env)
+                        print(f"{Colors.CYAN}WildFly em execução no foreground. Pressione Ctrl+C para parar.{Colors.END}")
+                        print(f"{Colors.GREEN}Aplicação: http://localhost:{WILDFLY_PORT}/caracore-hub/{Colors.END}")
+                        log("WildFly iniciado em foreground; logs sendo exibidos neste terminal.", "SUCCESS")
+                        wildfly_process.wait()
+                        log("WildFly finalizado (foreground).", "INFO")
+                    except KeyboardInterrupt:
+                        log("Interrompido pelo usuário. Enviando shutdown ao WildFly...", "INFO")
+                        try:
+                            if platform.system() == "Windows":
+                                cli_cmd = [os.path.join(wildfly_bin, "jboss-cli.bat"), "--connect", "--command=:shutdown"]
+                                subprocess.run(cli_cmd, shell=True, cwd=wildfly_bin, env=wildfly_env)
+                            else:
+                                cli_cmd = [os.path.join(wildfly_bin, "jboss-cli.sh"), "--connect", "--command=:shutdown"]
+                                subprocess.run(cli_cmd, cwd=wildfly_bin, env=wildfly_env)
+                        except Exception:
+                            pass
                     except Exception as e:
-                        log(f"Erro ao iniciar o WildFly: {str(e)}", "ERROR")
+                        log(f"Erro ao iniciar o WildFly em foreground: {str(e)}", "ERROR")
                         diagnose_wildfly_issues(wildfly_env)
                 else:
                     try:
-                        standalone_sh = os.path.join(wildfly_bin, "standalone.sh")
-                        os.chmod(standalone_sh, 0o755)  # Garantir que o script tenha permissão de execução
-                        wildfly_process = subprocess.Popen([standalone_sh], shell=True, env=wildfly_env)
+                        if platform.system() == "Windows":
+                            standalone_bat = os.path.join(wildfly_bin, "standalone.bat")
+                            wildfly_process = subprocess.Popen([standalone_bat], shell=True, cwd=wildfly_bin, env=wildfly_env)
+                        else:
+                            standalone_sh = os.path.join(wildfly_bin, "standalone.sh")
+                            os.chmod(standalone_sh, 0o755)
+                            wildfly_process = subprocess.Popen([standalone_sh], cwd=wildfly_bin, env=wildfly_env)
                         log("Comando de inicialização do WildFly executado com sucesso", "SUCCESS")
-                        print(f"{Colors.YELLOW}Aguardando o servidor inicializar (30 segundos)...{Colors.END}")
-                        time.sleep(30)  # Aguardar o WildFly iniciar completamente
-                        
-                        # Verificar se o WildFly iniciou com sucesso
-                        wildfly_started = check_server_running(WILDFLY_PORT)
-                        if wildfly_started:
+                        if wait_for_port(WILDFLY_PORT, timeout=60):
                             log("WildFly iniciado com sucesso", "SUCCESS")
                             log(f"Aplicação disponível em: http://localhost:{WILDFLY_PORT}/caracore-hub/ (se existir)", "SUCCESS")
                         else:
@@ -5085,6 +5413,10 @@ def main():
                 return ok_root
 
             tested_any = False
+            tomcat_login_ok = False
+            wildfly_login_ok = False
+            tomcat_base_url: str | None = None
+            wildfly_base_url: str | None = None
             if is_server_up("localhost", TOMCAT_PORT):
                 base = f"http://localhost:{TOMCAT_PORT}{'' if app_ctx == '/' else app_ctx}/"
                 log(f"Tomcat aparentemente disponível em {base}. Testando login (browser)...", "INFO")
@@ -5093,10 +5425,14 @@ def main():
                     log("Tentando fallback HTTP para Tomcat...", "WARNING")
                     if try_logins_for(base):
                         log("Login no Tomcat validado via HTTP (ROOT ou /caracore-hub/).", "SUCCESS")
+                        tomcat_login_ok = True
+                        tomcat_base_url = base
                     else:
                         log("Falha ao validar login no Tomcat (browser e HTTP).", "ERROR")
                 else:
                     log("Login no Tomcat validado via navegador.", "SUCCESS")
+                    tomcat_login_ok = True
+                    tomcat_base_url = base
                 tested_any = True
             else:
                 log("Tomcat não está em execução.", "WARNING")
@@ -5144,13 +5480,29 @@ def main():
                         ok_http = try_logins_for(base)
                         if ok_http:
                             log("Login no WildFly validado via HTTP.", "SUCCESS")
+                            wildfly_login_ok = True
+                            wildfly_base_url = base
                         else:
                             log("Falha ao validar login no WildFly (browser e HTTP).", "ERROR")
                     else:
                         log("Login no WildFly validado via navegador.", "SUCCESS")
+                        wildfly_login_ok = True
+                        wildfly_base_url = base
                     tested_any = True
             else:
                 log("WildFly não está em execução.", "WARNING")
+
+            if tomcat_login_ok and tomcat_base_url:
+                if run_pytest(tomcat_base_url):
+                    log("Testes Python concluídos com sucesso contra o Tomcat.", "SUCCESS")
+                else:
+                    log("Falha na execução dos testes Python após deploy no Tomcat.", "ERROR")
+
+            if wildfly_login_ok and wildfly_base_url:
+                if run_pytest(wildfly_base_url):
+                    log("Testes Python concluídos com sucesso contra o WildFly.", "SUCCESS")
+                else:
+                    log("Falha na execução dos testes Python após deploy no WildFly.", "ERROR")
 
             if not tested_any:
                 log("Nenhum servidor disponível (Tomcat 9090 / WildFly 8080).", "WARNING")

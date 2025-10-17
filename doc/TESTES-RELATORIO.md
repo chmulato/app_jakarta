@@ -1,5 +1,9 @@
 # Relatório de Execução de Testes Unitários (Atualizado)
 
+> Veja também no README
+- [Build e testes (Maven)](../README.md#readme-build-testes)
+- [Datasource (PostgreSQL)](../README.md#readme-datasource)
+
 ## Data: 21 de setembro de 2025
 
 ## Resumo

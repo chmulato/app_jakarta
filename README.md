@@ -1,15 +1,60 @@
 ## caracore-hub — Jakarta EE (Tomcat / WildFly)
 
 ![Capa do projeto](./doc/img/article_i.png)
-<sub><em>Capa do projeto — automação de build e deploy com foco em previsibilidade.</em></sub>
+
+> _Capa do projeto — automação de build e deploy com foco em previsibilidade._
 
 Aplicação Java (Jakarta EE) com autenticação, automação de build/deploy via Python e banco PostgreSQL (Docker). Este README foi atualizado para refletir o rename do projeto para "caracore-hub", o contexto padrão `/caracore-hub` e o fluxo E2E da opção 12.
 
-—
+### Destaques do projeto
+
+- Workflows automatizados de build, deploy e diagnóstico unificados em `main.py`.
+- Automação reproduzível com Python (venv) e provisionamento de banco usando Docker Compose.
+- Deploy homologado em Tomcat 10.1.35 e WildFly 37.0.1.Final com validações de datasource.
+- Testes fim a fim encapsulados (Opção 12) incluindo verificação de login via browser headless.
+
+---
+
+### Sumário
+
+- [caracore-hub — Jakarta EE (Tomcat / WildFly)](#caracore-hub--jakarta-ee-tomcat--wildfly)
+  - [Destaques do projeto](#destaques-do-projeto)
+  - [Sumário](#sumário)
+  - [Visão geral](#visão-geral)
+  - [Sequência de scripts (recomendado)](#sequência-de-scripts-recomendado)
+  - [Pré-requisitos](#pré-requisitos)
+  - [Deploy](#deploy)
+    - [Tomcat (via `main.py`, recomendado)](#tomcat-via-mainpy-recomendado)
+    - [Tomcat (plugin Maven para desenvolvimento)](#tomcat-plugin-maven-para-desenvolvimento)
+    - [WildFly](#wildfly)
+  - [Datasource (PostgreSQL)](#datasource-postgresql)
+    - [Origem padrão](#origem-padrão)
+    - [Automação via menu (`main.py`)](#automação-via-menu-mainpy)
+    - [Overrides temporários (PowerShell)](#overrides-temporários-powershell)
+    - [Validação](#validação)
+  - [Variáveis/argumentos úteis](#variáveisargumentos-úteis)
+  - [Troubleshooting rápido](#troubleshooting-rápido)
+    - [Portas 8080/9090 em uso](#portas-80809090-em-uso)
+    - [Docker inativo](#docker-inativo)
+    - [Compose v2](#compose-v2)
+    - [Logs de aplicação](#logs-de-aplicação)
+    - [Dependências JSTL](#dependências-jstl)
+    - [Erro `ModuleNotFoundError: No module named 'requests'`](#erro-modulenotfounderror-no-module-named-requests)
+  - [Estrutura (resumo)](#estrutura-resumo)
+  - [Testar login (Tomcat e WildFly)](#testar-login-tomcat-e-wildfly)
+    - [Pré-requisitos (login)](#pré-requisitos-login)
+    - [Tomcat (porta 9090)](#tomcat-porta-9090)
+    - [WildFly (porta 8080)](#wildfly-porta-8080)
+    - [Se o login falhar](#se-o-login-falhar)
+  - [Documentação essencial](#documentação-essencial)
+
+---
 
 ### Visão geral
+
 ![Visão geral (secundária)](./doc/img/article_ii.png)
-<sub><em>Visão geral do fluxo: banco de dados, build, deploy e validação de login.</em></sub>
+
+> _Visão geral do fluxo: banco de dados, build, deploy e validação de login._
 
 - Código da aplicação: `caracore-hub`
 - Automação: `main.py` (menu + build/deploy/diagnóstico)
@@ -20,37 +65,29 @@ Aplicação Java (Jakarta EE) com autenticação, automação de build/deploy vi
   - Tomcat 10.1.35 (HTTP 9090 quando standalone via `main.py`)
   - WildFly 37.0.1.Final (HTTP 8080, Management 9990)
 
-—
+---
 
 ### Sequência de scripts (recomendado)
+
 1. `setup-python.ps1`: prepara o ambiente Python local (cria `venv` e instala `requirements.txt`).
 2. `setup.dev.py`: valida configuração do ambiente de desenvolvimento (Java, Maven, Docker, PostgreSQL, bcrypt) e pode tentar corrigir.
 3. `main.py`: menu para build, deploy e gestão dos servidores (Tomcat/WildFly).
 
-—
+---
 
-### Pré‑requisitos
-- Java JDK 11+ (recomendado definir `JAVA_HOME`)
-- Maven 3.8+
-- Docker Desktop (Compose v2) para banco local
-- Python 3.10+ (para `main.py` e `setup.dev.py`)
+### Pré-requisitos
 
-Observação importante sobre servidores (não versionados):
-- Este repositório não inclui os binários dos servidores de aplicação.
-- Prepare a pasta `server/` localmente com as versões específicas:
-  - `server/apache-tomcat-10.1.35/` (Tomcat 10.1.35)
-  - `server/wildfly-37.0.1.Final/` (WildFly 37.0.1.Final)
-- Alternativa: aponte para instalações existentes usando variáveis de ambiente ou argumentos de CLI:
-  - `APP_TOMCAT_DIR` e `APP_WILDFLY_DIR`
-  - ou `--tomcat-dir` e `--wildfly-dir` ao chamar o `main.py`
-  - Exemplo (PowerShell):
-    ```powershell
-    $env:APP_TOMCAT_DIR = 'C:\servers\apache-tomcat-10.1.35'
-    $env:APP_WILDFLY_DIR = 'D:\servers\wildfly-37.0.1.Final'
-    python .\main.py --only-check
-    ```
+| Componente | Requisito mínimo | Observações |
+| --- | --- | --- |
+| Java | JDK 11+ | Defina `JAVA_HOME` para evitar conflitos com Maven |
+| Maven | 3.8+ | Necessário para o build multi-módulo |
+| Python | 3.10+ | Requerido por `main.py` e `setup.dev.py` |
+| Docker | Desktop + Compose v2 | Provisiona o PostgreSQL local |
+
+> **Importante:** este repositório não versiona os binários dos servidores. Crie a pasta `server/` com Tomcat 10.1.35 e WildFly 37.0.1.Final ou aponte caminhos via variáveis/argumentos (`APP_TOMCAT_DIR`, `APP_WILDFLY_DIR`, `--tomcat-dir`, `--wildfly-dir`).
 
 Teste rápido (PowerShell):
+
 ```powershell
 java -version
 mvn -version
@@ -58,152 +95,59 @@ python --version
 docker --version
 ```
 
-—
+---
 
-### Setup rápido (Windows PowerShell)
-1) Preparar o ambiente Python (cria venv e instala requirements):
-```powershell
-./setup-python.ps1
-```
-2) Ativar a venv (para rodar `setup.dev.py` e `main.py` no ambiente isolado):
-```powershell
-. .\.venv\Scripts\Activate.ps1
-```
-3) Validar a configuração do ambiente local (checagens e correções opcionais):
-```powershell
-python .\setup.dev.py --only-check   # Apenas checagens
-python .\setup.dev.py --auto-fix     # (Opcional) tenta corrigir problemas
-```
-4) Subir o Postgres em Docker (se ainda não estiver rodando):
-```powershell
-docker compose up -d postgres
-docker ps --filter "name=postgres"
-```
-5) Checagem final do projeto e/ou abrir o menu:
-```powershell
-python .\main.py --only-check
-python .\main.py
-```
-
-—
-### Execução (menu Python)
-Abra o menu interativo e siga as opções de build/deploy/diagnóstico:
-```powershell
-python .\main.py
-```
-
-Overrides de diretório dos servidores (precedência: argumento > variável > padrão):
-```powershell
-$env:APP_TOMCAT_DIR='C:\servers\tomcat10'
-$env:APP_WILDFLY_DIR='C:\servers\wildfly37'
-python .\main.py
-
-# ou via argumentos
-python .\main.py --tomcat-dir C:\servers\tomcat10 --wildfly-dir D:\wildfly-37
-```
-Logs do orquestrador: arquivos em `log/*.log`.
-
-—
-### Execução fim a fim (Opção 12)
-A opção 12 realiza um fluxo completo e não interativo:
-- para Tomcat e WildFly (se estiverem rodando), garantindo estado limpo;
-- sobe o PostgreSQL (Docker) e valida a conexão;
-- garante a semente do usuário ADMIN com hash BCrypt $2a$ (compatível com jBCrypt);
-- executa o build da aplicação (Maven);
-- faz deploy no Tomcat (cold deploy) e no WildFly (hot deploy);
-- valida JNDI/datasource por servidor (nomes distintos) e testa o login via browser headless.
-
-Comando:
-```powershell
-python .\main.py 12
-```
-
-![Opções do menu (main.py)](./doc/img/terminal_opcoes.png)
-<sub><em>Menu do orquestrador: opções de build, deploy e validação. A opção 12 executa o fluxo fim a fim.</em></sub>
-
-Padrões importantes:
-- JNDI: Tomcat usa `java:comp/env/jdbc/PostgresDS`; WildFly usa `java:/jdbc/PostgresDS`.
-- Contexto: o contexto padrão do WAR é `/caracore-hub`. Se o WAR for publicado como `ROOT.war`, o contexto será `/`.
-- Portas: Tomcat 9090; WildFly 8080; WildFly management 9990.
-
-—
-
-### Banco de Dados
-- Serviço: `postgres` em `docker-compose.yml`
-- Inicialização: scripts em `docker/postgres/init/*.sql`
-- Credenciais/DB padrão (compose): `meu_app_db` / `meu_app_user` / `meu_app_password`
-
-Usuários padrão criados no primeiro start (hash BCrypt de `Admin@123`):
-- admin@meuapp.com (ADMIN)
-- admin@exemplo.com (ADMIN)
-- joao@exemplo.com (USUARIO)
-- maria@exemplo.com (USUARIO)
-
-Validação do hash do admin (instala `bcrypt` se faltar):
-```powershell
-python .\setup.dev.py --auto-fix
-```
-
-—
-
-### Build e testes (Maven)
-```powershell
-cd .\caracore-hub
-mvn clean package -DskipTests
-mvn clean test verify
-```
-Perfis disponíveis no `pom.xml`: `tomcat`, `wildfly`, `run`.
-```powershell
-mvn clean package -Ptomcat -DskipTests
-mvn clean package -Pwildfly -DskipTests
-mvn -Prun
-```
-
-—
 ### Deploy
-Tomcat (recomendado via `main.py`):
-- Empacota WAR, configura `server.xml` para porta 9090 e copia `caracore-hub.war` para `webapps/` do Tomcat standalone.
-- Acesso: http://localhost:9090/caracore-hub
+
+#### Tomcat (via `main.py`, recomendado)
+
+- Empacota o WAR, ajusta `server.xml` para a porta 9090 e posiciona `caracore-hub.war` em `webapps/` do Tomcat standalone.
+- Acesso: [http://localhost:9090/caracore-hub](http://localhost:9090/caracore-hub)
 
 ![Página inicial no Tomcat (porta 9090)](./doc/img/index_tomcat_9090.png)
-<sub><em>Aplicação publicada no Tomcat (porta 9090) com contexto ROOT.</em></sub>
 
-Tomcat (plugin Maven de desenvolvimento):
+> _Aplicação publicada no Tomcat (porta 9090) com contexto ROOT._
+
+#### Tomcat (plugin Maven para desenvolvimento)
+
 ```powershell
 mvn -f .\caracore-hub\pom.xml tomcat10:run -DskipTests
 ```
-- Porta padrão do plugin: 8080 → http://localhost:8080/caracore-hub
 
-WildFly:
-- WAR enviado para `standalone/deployments` como `caracore-hub.war`.
-- Acesso: http://localhost:8080/caracore-hub
-- Console: http://localhost:9990/
+- Porta padrão do plugin: 8080 → [http://localhost:8080/caracore-hub](http://localhost:8080/caracore-hub)
+
+#### WildFly
+
+- O WAR é enviado para `standalone/deployments` como `caracore-hub.war`.
+- Acesso: [http://localhost:8080/caracore-hub](http://localhost:8080/caracore-hub)
+- Console: [http://localhost:9990/](http://localhost:9990/)
 
 ![Página inicial no WildFly (porta 8080)](./doc/img/index_wildfly_8080.png)
-<sub><em>Aplicação publicada no WildFly (porta 8080) com contexto ROOT.</em></sub>
 
-Portas podem ser ajustadas no `main.py` (`TOMCAT_PORT`, `WILDFLY_PORT`) ou nas configurações dos servidores.
+> _Aplicação publicada no WildFly (porta 8080) com contexto ROOT._
 
-—
+As portas podem ser ajustadas no `main.py` (`TOMCAT_PORT`, `WILDFLY_PORT`) ou diretamente nos servidores.
+
+---
+
 ### Datasource (PostgreSQL)
-- Origem das credenciais: lidas do `docker-compose.yml` (serviço `postgres`) e aplicadas no Tomcat/WildFly.
-- Overrides por ambiente: se definir, as variáveis `APP_DB_HOST`, `APP_DB_PORT`, `APP_DB_NAME`, `APP_DB_USER`, `APP_DB_PASSWORD` têm precedência.
-- Valores do compose (padrão do projeto):
-  - DB: `meu_app_db`
-  - Usuário: `meu_app_user`
-  - Senha: `meu_app_password`
-  - Host/Porta: `localhost:5432` (a partir de `ports: "5432:5432"`)
 
-No menu do `main.py`:
-- Opção 10: configura datasource PostgreSQL no WildFly (edita `standalone.xml` + adiciona driver em `modules/org/postgresql`).
-- Opção 11: configura datasource PostgreSQL no Tomcat (edita `conf/context.xml` + copia driver para `lib/`).
-- Deploy (opções 2 e 4) já aplicam essa configuração automaticamente antes de publicar o WAR.
+#### Origem padrão
 
-Importante:
-- Alterações em `conf/context.xml` não são aplicadas a quente. O `main.py` reinicia o Tomcat automaticamente após configurar o datasource (opção 11) para garantir que as mudanças entrem em vigor.
- - A opção 10 reinicia o WildFly automaticamente após aplicar o datasource para garantir que o servidor carregue a configuração.
+- Credenciais e banco vêm de `docker-compose.yml` (serviço `postgres`).
+- Valores padrão: DB `meu_app_db`, usuário `meu_app_user`, senha `meu_app_password`, host `localhost`, porta `5432`.
+- Variáveis `APP_DB_HOST`, `APP_DB_PORT`, `APP_DB_NAME`, `APP_DB_USER`, `APP_DB_PASSWORD` substituem os valores do compose quando definidas.
 
-Exemplos de overrides temporários (PowerShell):
+#### Automação via menu (`main.py`)
+
+- Opção 10: configura o datasource no WildFly (atualiza `standalone.xml` e cria o módulo JDBC).
+- Opção 11: configura o datasource no Tomcat (ajusta `conf/context.xml` e adiciona o driver em `lib/`).
+- Deploys das opções 2 (Tomcat) e 4 (WildFly) executam automaticamente essas etapas antes de publicar o WAR.
+
+> **Atenção:** alterações em `conf/context.xml` e `standalone.xml` exigem reinício. O menu trata o restart de ambos os servidores.
+
+#### Overrides temporários (PowerShell)
+
 ```powershell
 $env:APP_DB_HOST = '127.0.0.1'
 $env:APP_DB_PORT = '5433'
@@ -213,108 +157,141 @@ $env:APP_DB_PASSWORD = 'meu_app_password'
 python .\main.py
 ```
 
-Validação de conexão no próprio script:
-- `main.py` realiza um teste de conexão (se `psycopg2-binary` estiver instalado) usando os mesmos parâmetros.
+#### Validação
 
-Observações:
-- É feito backup automático de `standalone.xml` e `context.xml` (`*.bak`) antes de alterações.
-- O driver JDBC do PostgreSQL (42.7.4) é baixado automaticamente quando necessário.
+- `main.py` testa a conexão (se `psycopg2-binary` estiver instalado) com os mesmos parâmetros do deploy.
+- Backups automáticos (`*.bak`) são criados antes de editar `context.xml` e `standalone.xml`.
+- O driver JDBC PostgreSQL 42.7.4 é baixado sob demanda.
+
+---
 
 ### Variáveis/argumentos úteis
-- `APP_TOMCAT_DIR`: caminho do Tomcat
-- `APP_WILDFLY_DIR`: caminho do WildFly
-- `--tomcat-dir` / `--wildfly-dir`: overrides via CLI
-- `--only-check`: somente validações e saída
 
-—
+- `APP_TOMCAT_DIR`: caminho do Tomcat.
+- `APP_WILDFLY_DIR`: caminho do WildFly.
+- `--tomcat-dir` / `--wildfly-dir`: overrides via CLI para o `main.py`.
+- `--only-check`: executa somente validações e encerra.
+
+---
+
+
 ### Troubleshooting rápido
-- Porta ocupada (8080/9090):
+
+#### Portas 8080/9090 em uso
+
 ```powershell
 netstat -ano | findstr :8080
 taskkill /F /PID <PID>
 ```
-- Docker inativo: abra o Docker Desktop e revalide.
-- Compose v2: use `docker compose`, não `docker-compose`.
-- Tomcat logs: `server/apache-tomcat-*/logs/`
-- WildFly logs: `server/wildfly-*/standalone/log/server.log`
-- JSTL (Jakarta): use dependências `jakarta.servlet.jsp.jstl-*` (já no `pom.xml`).
 
-Erro: ModuleNotFoundError: No module named 'requests'
-- Você provavelmente executou com o Python global (fora da venv). Rode usando a venv:
-```powershell
-. .\.venv\Scripts\Activate.ps1
-python .\main.py
-```
-Ou sem ativar a venv (chamando o Python da venv diretamente):
-```powershell
-.\.venv\Scripts\python.exe .\main.py --only-check
-.\.venv\Scripts\python.exe .\main.py
-```
-Se a venv ainda não existir ou faltar pacotes, crie/atualize com:
-```powershell
-./setup-python.ps1
-```
-Teste rápido do pacote dentro da venv:
-```powershell
-.\.venv\Scripts\python.exe -c "import requests; print(requests.__version__)"
-```
+#### Docker inativo
 
-Documentação adicional: `doc/DEPLOY.md`, `doc/ARQUITETURA.md`, `doc/RESULTADOS-TESTES.md`.
+Abra o Docker Desktop e reexecute as checagens.
 
-—
+#### Compose v2
+
+Utilize `docker compose`, não `docker-compose`.
+
+#### Logs de aplicação
+
+- Tomcat: `server/apache-tomcat-*/logs/`
+- WildFly: `server/wildfly-*/standalone/log/server.log`
+
+#### Dependências JSTL
+
+Mantenha os artefatos `jakarta.servlet.jsp.jstl-*` do `pom.xml`.
+
+#### Erro `ModuleNotFoundError: No module named 'requests'`
+
+- Execute dentro da venv ou ative-a:
+
+  ```powershell
+  . .\.venv\Scripts\Activate.ps1
+  python .\main.py
+  ```
+
+- Rodar sem ativar a venv também funciona chamando o Python da própria venv:
+
+  ```powershell
+  .\.venv\Scripts\python.exe .\main.py --only-check
+  .\.venv\Scripts\python.exe .\main.py
+  ```
+
+- Caso faltem pacotes, reinstale-os:
+
+  ```powershell
+  ./setup-python.ps1
+  ```
+
+- Teste rápido do pacote:
+
+  ```powershell
+  .\.venv\Scripts\python.exe -c "import requests; print(requests.__version__)"
+  ```
+
+Documentação de apoio: `doc/DEPLOY.md`, `doc/ARQUITETURA.md`, `doc/RESULTADOS-TESTES.md`.
+
+---
+
 ### Estrutura (resumo)
-```
+
+```text
 app_jakarta/
- ├─ main.py
- ├─ docker-compose.yml
- ├─ docker/
- │   └─ postgres/init/01-init.sql
- ├─ caracore-hub/
- │   └─ pom.xml, src/
- ├─ server/ (criado se Tomcat/WildFly standalone forem usados)
- └─ log/ (maven_deploy.log)
+ |- main.py
+ |- docker-compose.yml
+ |- docker/
+ |  \\- postgres/init/01-init.sql
+ |- caracore-hub/
+ |  |- pom.xml (parent multi-módulo)
+ |  |- core/ (modelos, PdfService)
+ |  |- persistence/ (DAO, JPA, serviços)
+ |  |- api/ (JAX-RS)
+ |  \\- web/ (WAR, servlets, JSP)
+ |- server/ (gerado ao preparar Tomcat/WildFly standalone)
+ \\- log/ (maven_deploy.log)
 ```
+
+---
 
 ### Testar login (Tomcat e WildFly)
-Os servidores ficam em `server/`. Abaixo o passo a passo para subir, publicar e validar login.
 
-Pré‑requisitos
-- PostgreSQL rodando: `docker compose up -d postgres`
-- Deploy feito pelo menu do `main.py` (ele cuida de aplicar datasource e publicar o WAR)
+Os servidores ficam em `server/`. Use o passo a passo abaixo para validar autenticação após o deploy.
 
-Tomcat (porta 9090)
-1) Via `main.py`, escolha o deploy no Tomcat; o script coloca `ROOT.war` em `server/apache-tomcat-*/webapps` e reinicia se necessário.
-2) Abra: http://localhost:9090/caracore-hub
-3) Faça login com:
-  - admin@meuapp.com / Admin@123 (ADMIN)
-  - joao@exemplo.com / Admin@123 (USUARIO)
+#### Pré-requisitos (login)
 
-WildFly (porta 8080)
-1) Configure o datasource de Postgres pelo `main.py` (gera `standalone.xml` a partir do template e garante o driver JDBC).
-2) Inicie o servidor (menu do `main.py` ou `server/wildfly-*/bin/standalone.bat`).
-3) O deploy via `main.py` publica `caracore-hub.war` em `standalone/deployments`.
-4) Abra: http://localhost:8080/caracore-hub
-5) Login com as mesmas credenciais.
+- PostgreSQL ativo: `docker compose up -d postgres`.
+- Deploy executado via `python .\main.py` (opções 2, 4 ou 12).
 
-Se o login falhar
-- Verifique o banco e variáveis `APP_DB_*` (se usou overrides)
-- Consulte logs: Tomcat `server/apache-tomcat-*/logs/`, WildFly `server/wildfly-*/standalone/log/server.log`
-- Reaplique o datasource e reinicie o servidor (Tomcat reinicia via script; WildFly precisa reiniciar para novo `standalone.xml`)
+#### Tomcat (porta 9090)
 
-—
+1. No menu, escolha o deploy no Tomcat (gera `ROOT.war` e reinicia se necessário).
+2. Acesse [http://localhost:9090/caracore-hub](http://localhost:9090/caracore-hub).
+3. Faça login com `admin@meuapp.com` ou `supervisor@meuapp.com` (senha `Admin@123`).
+
+#### WildFly (porta 8080)
+
+1. Configure o datasource (opção 10) e inicie o servidor (`main.py` ou `server/wildfly-*/bin/standalone.bat`).
+2. Garanta o deploy (`main.py` opção 4) para publicar `caracore-hub.war` em `standalone/deployments`.
+3. Acesse [http://localhost:8080/caracore-hub](http://localhost:8080/caracore-hub) com as mesmas credenciais.
+
+#### Se o login falhar
+
+- Verifique o banco e variáveis `APP_DB_*`.
+- Consulte os logs (Tomcat `server/apache-tomcat-*/logs/`, WildFly `server/wildfly-*/standalone/log/server.log`).
+- Reaplique o datasource e reinicie os servidores.
+
+---
+
 ### Documentação essencial
-- Guia de Deploy: `doc/DEPLOY.md`
-- Arquitetura: `doc/ARQUITETURA.md`
-- Comandos Maven: `doc/MAVEN-COMANDOS.md`
-- Validação/Testes: `doc/TESTES-RELATORIO.md` e `doc/RESULTADOS-TESTES.md`
-- Perfil VS Code sem MCP: `doc/README_NO_MCP.md`
 
-Observação: o artigo executivo está em `doc/ARTICLE.md`, não referenciado como guia técnico.
+- Guia de deploy: `doc/DEPLOY.md`.
+- Arquitetura: `doc/ARQUITETURA.md`.
+- Comandos Maven: `doc/MAVEN-COMANDOS.md`.
+- Validação/Testes: `doc/TESTES-RELATORIO.md`, `doc/RESULTADOS-TESTES.md`.
+- Ambiente VS Code sem MCP: `doc/README_NO_MCP.md`.
 
-### Licença e suporte
-- Licença: Apache License 2.0. Consulte `LICENSE` e `NOTICE`.
-- Direitos autorais: © 2025 23.969.028 CHRISTIAN VLADIMIR UHDRE MULATO (CNPJ 23.969.028/0001-37).
-- Para suporte, anexe passos, `log/maven_deploy.log`, SO e versões (Java/Maven/Docker).
+> O artigo executivo está em `doc/ARTICLE.md` (referência complementar).
+
 
 —
-Última atualização: 21 de setembro de 2025
+Última atualização: Campo Largo, quinta-feira, 16 de outubro de 2025.
