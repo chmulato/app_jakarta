@@ -1,9 +1,11 @@
 ﻿# Fase 3 · Shopee e Temu + Estoque
 
 ## Objetivo
+
 Adicionar conectores Shopee e Temu, replicando o pipeline de integração estabelecido com Mercado Livre, e evoluir o módulo de estoque físico com mapa de posições, inventário cíclico e conferência de retirada no balcão com scanner.
 
 ## Escopo Funcional
+
 - **Conectores Shopee e Temu**
   - Tela de conectores passa a listar ML, Shopee e Temu.
   - Cadastro de credenciais, status, última sincronização e botões Testar/Reautorizar por conector.
@@ -26,6 +28,7 @@ Adicionar conectores Shopee e Temu, replicando o pipeline de integração estabe
   - Dashboard exibe backlog de pedidos não retirados com buckets 24h/48h/72h.
 
 ## Requisitos Não Funcionais
+
 - Consistência: todos os canais compartilham pipeline e regras de idempotência.
 - Escalabilidade com filas segregadas por canal (`fila_ml`, `fila_shopee`, `fila_temu`).
 - Resiliência com reprocessamentos, retry/backoff equivalentes à Fase 2.
@@ -33,6 +36,7 @@ Adicionar conectores Shopee e Temu, replicando o pipeline de integração estabe
 - Auditoria obrigatória para inventário e movimentações (usuário, data, motivo).
 
 ## Banco de Dados
+
 - **Novas tabelas**
   - `inventario_tarefa(id, tenant_id, criado_por, criado_em, tipo, status, filtro_sku, filtro_posicao)`
   - `inventario_resultado(id, tarefa_id, posicao_id, sku_id, qtd_esperada, qtd_contada, divergencia, contado_por, contado_em)`
@@ -43,6 +47,7 @@ Adicionar conectores Shopee e Temu, replicando o pipeline de integração estabe
   - `posicao` incluir flag `reservado` e índice por ocupação.
 
 ## APIs REST
+
 - `POST /api/integracoes/shopee/webhook`
 - `POST /api/integracoes/temu/webhook`
 - `GET /api/estoque/mapa?filtros`
@@ -53,6 +58,7 @@ Adicionar conectores Shopee e Temu, replicando o pipeline de integração estabe
 - `GET /api/pedidos/backlog?dias=2`
 
 ## Interfaces JSP + Bootstrap
+
 - `/integracoes/conectores.jsp` atualizado para suporte a múltiplos canais.
 - `/estoque/mapa.jsp` exibindo grid responsivo com ocupação.
 - `/estoque/inventario.jsp` para criar/gerenciar tarefas e registrar contagens.
@@ -60,6 +66,7 @@ Adicionar conectores Shopee e Temu, replicando o pipeline de integração estabe
 - Dashboard com widget "Backlog por tempo de espera" (24h/48h/72h).
 
 ## Critérios de Aceite
+
 - Conectores Shopee/Temu cadastrados e ativos recebem eventos via webhook e criam pedidos automaticamente.
 - Eventos duplicados não geram registros extras (idempotência validada).
 - Operador visualiza mapa de estoque e localiza qualquer volume.
@@ -68,6 +75,7 @@ Adicionar conectores Shopee e Temu, replicando o pipeline de integração estabe
 - Dashboard mostra pedidos pendentes de retirada por bucket de tempo.
 
 ## Estratégia Técnica
+
 - Reaproveitar pipeline da Fase 2, adicionando handlers específicos por canal.
 - Serviços `ShopeeService` e `TemuService` para autenticação (OAuth/token) e parsing dedicado.
 - UI compartilhar componentes JSP reutilizáveis diferenciados por canal.
@@ -75,18 +83,21 @@ Adicionar conectores Shopee e Temu, replicando o pipeline de integração estabe
 - Inventário gera registros esperados e compara com contagem do operador; divergências disparam alerta/auditoria.
 
 ## Testes Recomendados
+
 - **Unidade**: parsing de payload Shopee/Temu, geração de chave de idempotência, cálculo de divergências.
 - **Integração**: webhooks simulados criam pedidos corretos; movimentação de volume atualiza mapa.
 - **UI/Funcional**: mapa exibindo posições ocupadas/livres, fluxo completo de inventário e retirada com scanner.
 - **Performance**: resposta de retirada < 1s mesmo com 10k volumes.
 
 ## Rollout
+
 - Aplicar migração Flyway V3.
 - Ativar conectores Shopee/Temu em `integracao_conector`.
 - Treinar operadores nos novos fluxos de inventário e scanner.
 - Monitorar backlog de retirada e divergências nos primeiros dias.
 
 ## Validações em Python
+
 - `python -m pytest tests/fase_03/test_webhooks_multicanal.py` para garantir idempotência e roteamento por canal.
 - `python -m pytest tests/fase_03/test_inventario.py` validando geração de tarefas, comparação de contagens e registro de divergências.
 - `python scripts/validadores/testar_scanner.py --tenant demo` para simular leituras rápidas e verificar bloqueio de retirada incorreta.

@@ -1,15 +1,18 @@
 # Relatório de Execução de Testes Unitários (Atualizado)
 
 > Veja também no README
+
 - [Build e testes (Maven)](../README.md#readme-build-testes)
 - [Datasource (PostgreSQL)](../README.md#readme-datasource)
 
 ## Data: 21 de setembro de 2025
 
 ## Resumo
+
 Testes executados com JUnit 5 + Hibernate Validator. Cobertura gerada via JaCoCo (`mvn clean test verify`). Dependência Jakarta EL permanece necessária para interpolação de mensagens.
 
 ## Estatísticas (Exemplo Histórico)
+
 | Métrica | Valor |
 |---------|-------|
 | Total de Testes | 40 |
@@ -20,6 +23,7 @@ Testes executados com JUnit 5 + Hibernate Validator. Cobertura gerada via JaCoCo
 | Tempo Total | 5.247s |
 
 Reexecutar para atualizar os números reais:
+
 ```powershell
 mvn clean test
 ```
@@ -39,6 +43,7 @@ mvn clean test
 ### Erro: Validação Hibernate / EL
 
 **Descrição do erro:**
+
 ```
 jakarta.validation.ValidationException: HV000183: Unable to initialize 'jakarta.el.ExpressionFactory'. 
 Check that you have the EL dependencies on the classpath, or use ParameterMessageInterpolator instead
@@ -60,6 +65,7 @@ Adicionamos a dependência do Jakarta EL ao pom.xml:
 ```
 
 ## Localização dos Relatórios
+
 | Arquivo / Diretório | Descrição |
 |---------------------|-----------|
 | `target/surefire-reports/` | Logs XML/Plain de execução dos testes |
@@ -67,11 +73,13 @@ Adicionamos a dependência do Jakarta EL ao pom.xml:
 | `target/jacoco.exec` | Dados binários de cobertura |
 
 Abrir relatório HTML (Windows PowerShell):
+
 ```powershell
 Start-Process .\caracore-hub\target\site\jacoco\index.html
 ```
 
 ## Execução de Testes (Comandos)
+
 ```powershell
 # Testes + cobertura
 mvn clean test verify
@@ -84,16 +92,20 @@ mvn dependency:tree -Dincludes=junit:junit
 ```
 
 ## Integração com Script Python
+
 O script `main.py` hoje foca em build/deploy. Opções futuras:
+
 1. Adicionar função `run_maven_tests()` integrada ao menu (já existe stub)
 2. Consolidar parsing do `jacoco.exec` para extrair métricas resumidas
 
 ## Observações
+
 - Entidades validadas com Hibernate Validator + EL
 - Testes de servlet simulam requests (mock / wrappers)
 - Configurações sensíveis (DB) devem ser isoladas ou mockadas se necessário
 
 ## Próximos Passos
+
 | Ação | Benefício |
 |------|-----------|
 | Aumentar cobertura em DAO/servlets | Garantir regressão controlada |

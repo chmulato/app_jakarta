@@ -1,10 +1,12 @@
 # Resultados dos Testes de Deploy (Atualizado)
 
 > Veja também no README
+> 
 - [Execução fim a fim (Opção 12)](../README.md#readme-opcao-12)
 - [Troubleshooting rápido](../README.md#readme-troubleshooting)
 
 ## Histórico
+
 | Data | Contexto |
 |------|----------|
 | 16/09/2025 | Testes pós-refatoração inicial (scripts PowerShell) |
@@ -12,9 +14,11 @@
 | 21/09/2025 | E2E (opção 12) validado em Tomcat e WildFly; login automatizado via fallback HTTP |
 
 ## Objetivo
+
 Testar o deploy da aplicação Java nos servidores Tomcat e WildFly após refatoração da arquitetura.
 
 ## Infraestrutura
+
 - **PostgreSQL**: ✅ Rodando no Docker (porta 5432) - Status: HEALTHY
 - **Sistema**: Java 11, Maven, Windows + PowerShell
 
@@ -34,6 +38,7 @@ Testar o deploy da aplicação Java nos servidores Tomcat e WildFly após refato
 | **Configuração** | ✅ **FLEXÍVEL** | Sem hardcode, via properties |
 
 **Comando executado:**
+
 ```powershell
 mvn clean package -Pwildfly -DskipTests
 python .\main.py 12   # E2E inclui deploy e validação
@@ -55,12 +60,14 @@ python .\main.py 12   # E2E inclui deploy e validação
 | **Configuração** | ✅ **FLEXÍVEL** | Sem hardcode, via properties |
 
 **Comando executado:**
+
 ```powershell
 mvn clean package -Ptomcat -DskipTests
 python .\main.py 12   # E2E inclui deploy e validação
 ```
 
 **Correção aplicada:**
+
 ```xml
 <!-- Hibernate Commons Annotations - para corrigir o erro de JPA -->
 <dependency>
@@ -73,6 +80,7 @@ python .\main.py 12   # E2E inclui deploy e validação
 ---
 
 ## Observações de arquitetura (atual)
+
 - Projeto renomeado para `caracore-hub`; pacote base `com.caracore.hub_town`.
 - Contexto padrão `/caracore-hub` em ambos os servidores.
 - JNDI distintos: Tomcat `java:comp/env/jdbc/PostgresDS`, WildFly `java:/jdbc/PostgresDS`.
@@ -80,6 +88,7 @@ python .\main.py 12   # E2E inclui deploy e validação
 ---
 
 ## Status atual
+
 | Servidor | Status | Observação |
 |----------|--------|------------|
 | WildFly  | ✅ Pronto | Deploy consistente via plugin ou script |
@@ -90,6 +99,7 @@ python .\main.py 12   # E2E inclui deploy e validação
 ## Correções importantes (históricas)
 
 Adicionamos a dependência que faltava ao perfil do Tomcat:
+
 ```xml
 <dependency>
     <groupId>org.hibernate.common</groupId>
@@ -99,6 +109,7 @@ Adicionamos a dependência que faltava ao perfil do Tomcat:
 ```
 
 **Resultado do teste histórico:**
+
 ```
 Iniciando teste do Hibernate Commons Annotations...
 ✅ Classe ReflectionManager carregada com sucesso: org.hibernate.annotations.common.reflection.ReflectionManager
@@ -108,23 +119,27 @@ Teste concluído com sucesso! A dependência hibernate-commons-annotations está
 ```
 
 ## Execução de testes (atual)
+
 ```powershell
 mvn clean test verify
 # Relatório cobertura: target/site/jacoco/index.html
 ```
 
 Ou usando script (build sem testes + depois testes separados):
+
 ```powershell
 python .\main.py --only-check
 mvn test
 ```
 
 ## Testes Python (Fase 1)
+
 ```powershell
 pytest tests/fase_01
 ```
 
 ### Resultado 26/09/2025
+
 | Teste | Status | Observação |
 |-------|--------|------------|
 | Autenticação (login sucesso / erro) | ⏭️ Skip | Ambiente web não estava ativo durante a execução; testes aguardam `APP_TEST_BASE_URL`. |
@@ -141,4 +156,4 @@ pytest tests/fase_01
 - **Arquitetura**: Clean code principles aplicados com sucesso
 - **Flexibilidade**: Zero hardcode, configuração totalmente externa
 
-**🏆 Conclusão:** E2E validado em 21/09/2025. WildFly e Tomcat funcionais, login automatizado confirmado (HTTP 302 → /caracore-hub/dashboard). Logs e CLI do WildFly podem ter timeouts intermitentes; não bloqueiam a validação.
+**Conclusão:** E2E validado em 21/09/2025. WildFly e Tomcat funcionais, login automatizado confirmado (HTTP 302 → /caracore-hub/dashboard). Logs e CLI do WildFly podem ter timeouts intermitentes; não bloqueiam a validação.

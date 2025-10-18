@@ -1,9 +1,11 @@
 ﻿# Fase 4 · UX, Relatórios, Erros e Auditoria
 
 ## Objetivo
+
 Elevar a eficiência do Hub com UX refinada, relatórios operacionais, centro de erros com reprocessamento, auditoria alinhada à LGPD e exportações assíncronas (CSV), além de observabilidade avançada e melhorias de acessibilidade.
 
 ## Escopo Funcional
+
 - **Relatórios operacionais**
   - Painel de KPIs com: entradas do dia, prontos, retirados, lead time (p50/p90) e backlog por canal/faixa (0-24/24-48/48-72/72+ horas).
   - Relatórios detalhados com filtros e paginação server-side: ciclo do pedido (timestamps, operador, SLA), divergências (recebimento/inventário/etiqueta) e eficiência de balcão (tempo médio por operador/turno).
@@ -28,6 +30,7 @@ Elevar a eficiência do Hub com UX refinada, relatórios operacionais, centro de
   - Internacionalização básica (PT-BR base, chaves i18n na UI).
 
 ## Requisitos Não Funcionais
+
 - Performance de relatórios usando views/materialized views e paginação server-side.
 - Observabilidade com métricas de latência por endpoint, backlog de fila, taxa de erro por conector e tempo de geração de export.
 - Tracing distribuído (OpenTelemetry) correlacionando webhook → processamento → UI.
@@ -35,6 +38,7 @@ Elevar a eficiência do Hub com UX refinada, relatórios operacionais, centro de
 - Confiabilidade: reprocessamento idempotente e auditado.
 
 ## Banco de Dados
+
 - **Novas tabelas**
   - `relatorio_export(id, tenant_id, tipo, filtros_json, status, arquivo_path, created_at, finished_at, requested_by, motivo)`
   - `auditoria(id, tenant_id, entidade, entidade_id, acao, antes_json, depois_json, actor, created_at, trace_id)`
@@ -51,6 +55,7 @@ Elevar a eficiência do Hub com UX refinada, relatórios operacionais, centro de
   - `relatorio_export(tenant_id, status, created_at)`.
 
 ## APIs REST
+
 - **Relatórios**
   - `GET /api/relatorios/kpis?inicio&fim&canal`
   - `GET /api/relatorios/ciclo?pagina&tamanho&filtros`
@@ -68,6 +73,7 @@ Elevar a eficiência do Hub com UX refinada, relatórios operacionais, centro de
   - `POST /api/auditoria/exportar`
 
 ## Observabilidade
+
 - Métricas (MicroProfile Metrics):
   - `app_kpi_pedidos_recebidos_total`, `app_kpi_prontos_total`, `app_kpi_retirados_total`.
   - `app_lead_time_ready_ms{canal}`, `app_lead_time_pickup_ms{canal}`.
@@ -77,6 +83,7 @@ Elevar a eficiência do Hub com UX refinada, relatórios operacionais, centro de
 - Logs estruturados em JSON com `tenant`, `usuario`, `traceId`, `acao`, `entidade`, `resultado`.
 
 ## Critérios de Aceite
+
 - Dashboard exibe KPIs e backlog por faixa com dados validados por amostras SQL.
 - Relatórios listam e filtram com paginação server-side (`p95 < 800ms`).
 - Exportações: usuário agenda, recebe notificação quando pronto e baixa CSV; link expira corretamente.
@@ -85,18 +92,21 @@ Elevar a eficiência do Hub com UX refinada, relatórios operacionais, centro de
 - Acessibilidade: navegação por teclado e contraste AA atendidos.
 
 ## Testes Recomendados
+
 - **Unidade**: agregadores de métricas, calculadora de lead time, gerador de tokens de download, mascaramento de PII.
 - **Integração**: geração/refresh de materialized views, job de export produz arquivo correto, reprocessamento altera status do evento.
 - **Carga**: 100k pedidos e 500k eventos → relatórios respondem < 1s (`p95`) com views atualizadas.
 - **Segurança**: RBAC das páginas, tokens de download inválidos/expirados bloqueados, logs sem PII.
 
 ## Rollout
+
 - Aplicar migração Flyway V4.
 - Configurar jobs (refresh de views e processador de exportações).
 - Publicar métricas no Prometheus e montar dashboards (lead time, backlog, erros, exportações).
 - Treinar equipe em exportações com justificativa, uso do centro de erros e leitura de auditoria.
 
 ## Validações em Python
+
 - `python -m pytest tests/fase_04/test_relatorios.py` para garantir agregações, paginação e tempos de resposta.
 - `python -m pytest tests/fase_04/test_exportacoes.py` cobrindo agendamento, geração e download com token.
 - `python scripts/validadores/auditoria.py --modo compliance` para checar mascaramento de PII, trilha de auditoria e políticas de expiração de links.
