@@ -15,11 +15,11 @@
         <class>com.caracore.hub_town.model.Volume</class>
         <class>com.caracore.hub_town.model.Posicao</class>
         <class>com.caracore.hub_town.model.EventoPedido</class>
-    <class>com.caracore.hub_town.model.IntegracaoConector</class>
-    <class>com.caracore.hub_town.model.IntegracaoEvento</class>
-    <class>com.caracore.hub_town.model.Idempotencia</class>
-    <class>com.caracore.hub_town.model.MapeamentoSku</class>
-    <class>com.caracore.hub_town.model.MapeamentoStatus</class>
+        <class>com.caracore.hub_town.model.IntegracaoConector</class>
+        <class>com.caracore.hub_town.model.IntegracaoEvento</class>
+        <class>com.caracore.hub_town.model.Idempotencia</class>
+        <class>com.caracore.hub_town.model.MapeamentoSku</class>
+        <class>com.caracore.hub_town.model.MapeamentoStatus</class>
 
         <properties>
             <property name="jakarta.persistence.jdbc.dialect" value="org.hibernate.dialect.PostgreSQLDialect"/>
