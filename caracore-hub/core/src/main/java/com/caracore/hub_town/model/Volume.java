@@ -26,6 +26,10 @@ public class Volume {
     @Column(name = "etiqueta", nullable = false, length = 64, unique = true)
     private String etiqueta;
 
+    @Size(max = 256)
+    @Column(name = "etiqueta_externa", length = 256)
+    private String etiquetaExterna;
+
     @Column(name = "peso", precision = 10, scale = 2)
     private BigDecimal peso;
 
@@ -54,6 +58,8 @@ public class Volume {
     public void setPedido(Pedido pedido) { this.pedido = pedido; }
     public String getEtiqueta() { return etiqueta; }
     public void setEtiqueta(String etiqueta) { this.etiqueta = etiqueta; }
+    public String getEtiquetaExterna() { return etiquetaExterna; }
+    public void setEtiquetaExterna(String etiquetaExterna) { this.etiquetaExterna = etiquetaExterna; }
     public BigDecimal getPeso() { return peso; }
     public void setPeso(BigDecimal peso) { this.peso = peso; }
     public String getDimensoes() { return dimensoes; }
