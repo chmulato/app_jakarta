@@ -52,7 +52,7 @@ Publicar em Tomcat ou em WildFly sempre teve diferenças práticas. Nosso fluxo 
 
 Para o time, tudo acontece a partir de um menu único (main.py). É possível executar o fluxo completo em um passo (opção 12) ou rodar etapas específicas quando necessário.
 
-![Opções do terminal (main.py)](./img/terminal_opcoes.png)
+![Opções do terminal (main.py)](./img/terminal-opcoes.png)
 <sub><em>Menu do orquestrador: opções de build, deploy e validação. A opção 12 executa o fluxo fim a fim.</em></sub>
 
 ### Próximos passos
