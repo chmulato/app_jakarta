@@ -1,6 +1,6 @@
 ## caracore-hub — Jakarta EE (Tomcat / WildFly)
 
-![Capa do projeto](./doc/img/article_i.png)
+![Capa do projeto: automação de build e deploy](./doc/img/article_i.png)
 
 > _Capa do projeto — automação de build e deploy com foco em previsibilidade._
 
@@ -53,7 +53,7 @@ Aplicação Java (Jakarta EE) com autenticação, automação de build/deploy vi
 
 ### Visão geral
 
-![Visão geral (secundária)](./doc/img/article_ii.png)
+![Fluxo geral: banco, build, deploy e login](./doc/img/article_ii.png)
 
 > _Visão geral do fluxo: banco de dados, build, deploy e validação de login._
 
@@ -105,7 +105,7 @@ docker --version
 - Empacota o WAR, ajusta `server.xml` para a porta 9090 e posiciona `caracore-hub.war` em `webapps/` do Tomcat standalone.
 - Acesso: [http://localhost:9090/caracore-hub](http://localhost:9090/caracore-hub)
 
-![Página inicial no Tomcat (porta 9090)](./doc/img/index_tomcat_9090.png)
+![Página inicial do sistema no Tomcat (porta 9090)](./doc/img/index_tomcat_9090.png)
 
 > _Aplicação publicada no Tomcat (porta 9090) com contexto ROOT._
 
@@ -123,7 +123,7 @@ mvn -f .\caracore-hub\pom.xml tomcat10:run -DskipTests
 - Acesso: [http://localhost:8080/caracore-hub](http://localhost:8080/caracore-hub)
 - Console: [http://localhost:9990/](http://localhost:9990/)
 
-![Página inicial no WildFly (porta 8080)](./doc/img/index_wildfly_8080.png)
+![Página inicial do sistema no WildFly (porta 8080)](./doc/img/index_wildfly_8080.png)
 
 > _Aplicação publicada no WildFly (porta 8080) com contexto ROOT._
 
